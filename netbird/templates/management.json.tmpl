@@ -1,0 +1,60 @@
+{
+  "Stuns": [
+    {
+      "Proto": "udp",
+      "URI": "stun:${NETBIRD_DOMAIN}:3478"
+    }
+  ],
+  "TURNConfig": {
+    "Turns": [
+      {
+        "Proto": "udp",
+        "URI": "turn:${NETBIRD_DOMAIN}:3478",
+        "Username": "${NETBIRD_TURN_USER}",
+        "Password": "${NETBIRD_TURN_PASSWORD}"
+      },
+      {
+        "Proto": "tcp",
+        "URI": "turn:${NETBIRD_DOMAIN}:3478",
+        "Username": "${NETBIRD_TURN_USER}",
+        "Password": "${NETBIRD_TURN_PASSWORD}"
+      }
+    ],
+    "CredentialsTTL": "12h",
+    "Secret": "${NETBIRD_TURN_SECRET}",
+    "TimeBasedCredentials": false
+  },
+  "Relay": {
+    "Addresses": [
+      "rels://${NETBIRD_DOMAIN}:443"
+    ],
+    "CredentialsTTL": "24h",
+    "Secret": "${NETBIRD_RELAY_AUTH_SECRET}"
+  },
+  "Signal": {
+    "Proto": "https",
+    "URI": "${NETBIRD_DOMAIN}:443"
+  },
+  "ReverseProxy": {
+    "TrustedHTTPProxies": [],
+    "TrustedHTTPProxiesCount": 0,
+    "TrustedPeers": [
+      "0.0.0.0/0"
+    ]
+  },
+  "Datadir": "/var/lib/netbird",
+  "DataStoreEncryptionKey": "${NETBIRD_DATASTORE_ENC_KEY}",
+  "DisableDefaultPolicy": ${NETBIRD_MGMT_DISABLE_DEFAULT_POLICY_JSON},
+  "EmbeddedIdP": {
+    "Enabled": true,
+    "LocalAuthDisabled": ${NETBIRD_LOCAL_AUTH_DISABLED_JSON},
+    "Issuer": "https://${NETBIRD_DOMAIN}/oauth2",
+    "DashboardRedirectURIs": [
+      "https://${NETBIRD_DOMAIN}/nb-auth",
+      "https://${NETBIRD_DOMAIN}/nb-silent-auth"
+    ],
+    "CliRedirectURIs": [
+      "http://localhost:53000/"
+    ]
+  }
+}

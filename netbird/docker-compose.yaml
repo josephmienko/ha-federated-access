@@ -1,0 +1,373 @@
+x-default: &default
+  restart: unless-stopped
+  init: true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  networks:
+    - netbird
+
+services:
+  traefik:
+    restart: unless-stopped
+    init: true
+    image: traefik:${NETBIRD_TRAEFIK_TAG:-v3.6.7}
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${NETBIRD_LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+    networks:
+      - netbird
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.landing-redirect-web.rule=Host(`${LANDING_DOMAIN:-landing.invalid}`)
+      - traefik.http.routers.landing-redirect-web.entrypoints=web
+      - traefik.http.routers.landing-redirect-web.middlewares=landing-redirect
+      - traefik.http.routers.landing-redirect-web.priority=100
+      - traefik.http.routers.landing-redirect-web.service=noop@internal
+      - traefik.http.routers.landing-redirect-websecure.rule=Host(`${LANDING_DOMAIN:-landing.invalid}`)
+      - traefik.http.routers.landing-redirect-websecure.entrypoints=websecure
+      - traefik.http.routers.landing-redirect-websecure.tls=true
+      - traefik.http.routers.landing-redirect-websecure.tls.certresolver=letsencrypt
+      - traefik.http.routers.landing-redirect-websecure.middlewares=landing-redirect
+      - traefik.http.routers.landing-redirect-websecure.priority=100
+      - traefik.http.routers.landing-redirect-websecure.service=noop@internal
+      - traefik.http.middlewares.landing-redirect.redirectregex.regex=^https?://[^/]+(?:/.*)?$$
+      - traefik.http.middlewares.landing-redirect.redirectregex.replacement=${LANDING_REDIRECT_URL:-https://ha.proxy.invalid/auth/oidc/redirect}
+      - traefik.http.middlewares.landing-redirect.redirectregex.permanent=true
+
+  dashboard:
+    <<: *default
+    image: netbirdio/dashboard:${NETBIRD_DASHBOARD_TAG:-latest}
+    environment:
+      NETBIRD_MGMT_API_ENDPOINT: https://${NETBIRD_DOMAIN}
+      NETBIRD_MGMT_GRPC_API_ENDPOINT: https://${NETBIRD_DOMAIN}
+      AUTH_AUDIENCE: netbird-dashboard
+      AUTH_CLIENT_ID: netbird-dashboard
+      AUTH_CLIENT_SECRET: ""
+      AUTH_AUTHORITY: https://${NETBIRD_DOMAIN}/oauth2
+      USE_AUTH0: "false"
+      AUTH_SUPPORTED_SCOPES: openid profile email offline_access
+      AUTH_REDIRECT_URI: /nb-auth
+      AUTH_SILENT_REDIRECT_URI: /nb-silent-auth
+      NGINX_SSL_PORT: "443"
+    # Keep self-hosted public control-plane names on-box for LAN-side lookups.
+    extra_hosts:
+      - "${NETBIRD_DOMAIN}:host-gateway"
+      - "${AUTHENTIK_DOMAIN:-auth.invalid}:host-gateway"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.netbird-dashboard.rule=Host(`${NETBIRD_DOMAIN}`)
+      - traefik.http.routers.netbird-dashboard.entrypoints=websecure
+      - traefik.http.routers.netbird-dashboard.tls=true
+      - traefik.http.routers.netbird-dashboard.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-dashboard.priority=1
+      - traefik.http.services.netbird-dashboard.loadbalancer.server.port=80
+
+  signal:
+    <<: *default
+    image: netbirdio/signal:${NETBIRD_SIGNAL_TAG:-latest}
+    volumes:
+      - signal-data:/var/lib/netbird
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.netbird-signal-ws.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/ws-proxy/signal`)
+      - traefik.http.routers.netbird-signal-ws.entrypoints=websecure
+      - traefik.http.routers.netbird-signal-ws.tls=true
+      - traefik.http.routers.netbird-signal-ws.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-signal-ws.service=netbird-signal-ws
+      - traefik.http.services.netbird-signal-ws.loadbalancer.server.port=80
+      - traefik.http.routers.netbird-signal-grpc.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/signalexchange.SignalExchange/`)
+      - traefik.http.routers.netbird-signal-grpc.entrypoints=websecure
+      - traefik.http.routers.netbird-signal-grpc.tls=true
+      - traefik.http.routers.netbird-signal-grpc.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-signal-grpc.service=netbird-signal-grpc
+      - traefik.http.services.netbird-signal-grpc.loadbalancer.server.port=${NETBIRD_SIGNAL_PORT}
+      - traefik.http.services.netbird-signal-grpc.loadbalancer.server.scheme=h2c
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+  relay:
+    <<: *default
+    image: netbirdio/relay:${NETBIRD_RELAY_TAG:-latest}
+    environment:
+      NB_LOG_LEVEL: info
+      NB_LISTEN_ADDRESS: :${NETBIRD_RELAY_PORT}
+      NB_EXPOSED_ADDRESS: rels://${NETBIRD_DOMAIN}:443
+      NB_AUTH_SECRET: ${NETBIRD_RELAY_AUTH_SECRET}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.netbird-relay.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/relay`)
+      - traefik.http.routers.netbird-relay.entrypoints=websecure
+      - traefik.http.routers.netbird-relay.tls=true
+      - traefik.http.routers.netbird-relay.tls.certresolver=letsencrypt
+      - traefik.http.services.netbird-relay.loadbalancer.server.port=${NETBIRD_RELAY_PORT}
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+  management:
+    <<: *default
+    image: netbirdio/management:${NETBIRD_MANAGEMENT_TAG:-latest}
+    depends_on:
+      - dashboard
+      - signal
+      - relay
+    volumes:
+      - management-data:/var/lib/netbird
+      - ./generated/management.json:/etc/netbird/management.json:ro
+    ports:
+      - "127.0.0.1:${NETBIRD_MGMT_API_PORT}:33073"
+    # The management service validates issuer URLs and self-references during
+    # IdP convergence, so avoid WAN hairpinning back to the local stack.
+    extra_hosts:
+      - "${NETBIRD_DOMAIN}:host-gateway"
+      - "${AUTHENTIK_DOMAIN:-auth.invalid}:host-gateway"
+    command:
+      - --port
+      - "33073"
+      - --log-file
+      - console
+      - --log-level
+      - info
+      - --disable-anonymous-metrics=${NETBIRD_DISABLE_ANONYMOUS_METRICS}
+      - --dns-domain=${NETBIRD_MGMT_DNS_DOMAIN}
+      - --idp-sign-key-refresh-enabled
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.netbird-api.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/api`)
+      - traefik.http.routers.netbird-api.entrypoints=websecure
+      - traefik.http.routers.netbird-api.tls=true
+      - traefik.http.routers.netbird-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-api.service=netbird-api
+      - traefik.http.services.netbird-api.loadbalancer.server.port=33073
+      - traefik.http.routers.netbird-mgmt-ws.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/ws-proxy/management`)
+      - traefik.http.routers.netbird-mgmt-ws.entrypoints=websecure
+      - traefik.http.routers.netbird-mgmt-ws.tls=true
+      - traefik.http.routers.netbird-mgmt-ws.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-mgmt-ws.service=netbird-mgmt-ws
+      - traefik.http.services.netbird-mgmt-ws.loadbalancer.server.port=33073
+      - traefik.http.routers.netbird-mgmt-grpc.rule=Host(`${NETBIRD_DOMAIN}`) && (PathPrefix(`/management.ManagementService/`) || PathPrefix(`/management.ProxyService/`))
+      - traefik.http.routers.netbird-mgmt-grpc.entrypoints=websecure
+      - traefik.http.routers.netbird-mgmt-grpc.tls=true
+      - traefik.http.routers.netbird-mgmt-grpc.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-mgmt-grpc.service=netbird-mgmt-grpc
+      - traefik.http.services.netbird-mgmt-grpc.loadbalancer.server.port=33073
+      - traefik.http.services.netbird-mgmt-grpc.loadbalancer.server.scheme=h2c
+      - traefik.http.routers.netbird-oauth2.rule=Host(`${NETBIRD_DOMAIN}`) && PathPrefix(`/oauth2`)
+      - traefik.http.routers.netbird-oauth2.entrypoints=websecure
+      - traefik.http.routers.netbird-oauth2.tls=true
+      - traefik.http.routers.netbird-oauth2.tls.certresolver=letsencrypt
+      - traefik.http.routers.netbird-oauth2.service=netbird-oauth2
+      - traefik.http.services.netbird-oauth2.loadbalancer.server.port=33073
+
+  proxy:
+    <<: *default
+    profiles:
+      - reverse-proxy
+    image: netbirdio/reverse-proxy:${NETBIRD_PROXY_TAG:-latest}
+    container_name: netbird-proxy
+    depends_on:
+      - management
+    env_file:
+      - ./generated/proxy.env
+    # Consumer routers often do not support hairpin NAT back to the Pi's
+    # public NetBird/Auth domains, so keep those lookups on-box.
+    extra_hosts:
+      - "${NETBIRD_DOMAIN}:host-gateway"
+      - "${AUTHENTIK_DOMAIN:-auth.invalid}:host-gateway"
+    volumes:
+      - proxy-certs:/certs
+    labels:
+      - traefik.enable=true
+      - traefik.tcp.routers.proxy-passthrough.entrypoints=websecure
+      - traefik.tcp.routers.proxy-passthrough.rule=HostSNIRegexp(`^[^.]+\.${NETBIRD_PROXY_DOMAIN}$`)
+      - traefik.tcp.routers.proxy-passthrough.tls.passthrough=true
+      - traefik.tcp.routers.proxy-passthrough.service=proxy-tls
+      - traefik.tcp.routers.proxy-passthrough.priority=1
+      - traefik.tcp.services.proxy-tls.loadbalancer.server.port=8443
+
+  homeassistant-forwarder:
+    <<: *default
+    image: alpine:latest
+    container_name: homeassistant-forwarder
+    networks:
+      - netbird
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: sh -c "apk add --no-cache socat && socat TCP-LISTEN:8080,reuseaddr,fork TCP:host.docker.internal:8123"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.homeassistant.rule=Host(`ha.proxy.crookedsentry.net`)
+      - traefik.http.routers.homeassistant.entrypoints=websecure
+      - traefik.http.routers.homeassistant.tls=true
+      - traefik.http.routers.homeassistant.tls.certresolver=letsencrypt
+      - traefik.http.services.homeassistant.loadbalancer.server.port=8080
+
+  peer:
+    profiles:
+      - browser-access
+    restart: unless-stopped
+    init: true
+    image: netbirdio/netbird:${NETBIRD_CLIENT_TAG:-latest}
+    container_name: netbird-peer
+    hostname: ${NETBIRD_PI_PEER_NAME}
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ./generated/peer.env
+    # The browser-access peer runs in host mode, so loop self-hosted public
+    # control-plane names back to the local stack instead of the WAN IP.
+    extra_hosts:
+      - "${NETBIRD_DOMAIN}:127.0.0.1"
+      - "${AUTHENTIK_DOMAIN:-auth.invalid}:127.0.0.1"
+    volumes:
+      - peer-data:/var/lib/netbird
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+  coturn:
+    restart: unless-stopped
+    init: true
+    image: coturn/coturn:${COTURN_TAG:-4.6.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    network_mode: host
+    volumes:
+      - ./generated/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command:
+      - -c
+      - /etc/coturn/turnserver.conf
+
+  authentik-postgresql:
+    <<: *default
+    profiles:
+      - authentik
+    image: postgres:${AUTHENTIK_POSTGRES_TAG:-16-alpine}
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_POSTGRES_DB:-authentik}
+      POSTGRES_USER: ${AUTHENTIK_POSTGRES_USER:-authentik}
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:-}
+    volumes:
+      - authentik-postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ${AUTHENTIK_POSTGRES_DB:-authentik} -U ${AUTHENTIK_POSTGRES_USER:-authentik}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  authentik-redis:
+    <<: *default
+    profiles:
+      - authentik
+    image: redis:${AUTHENTIK_REDIS_TAG:-7-alpine}
+    command:
+      - --save
+      - "60"
+      - "1"
+      - --loglevel
+      - warning
+    volumes:
+      - authentik-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  authentik-server:
+    <<: *default
+    profiles:
+      - authentik
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.2}
+    command: server
+    depends_on:
+      - authentik-postgresql
+      - authentik-redis
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:-}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+    volumes:
+      - authentik-media:/media
+      - authentik-custom-templates:/templates
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.authentik.rule=Host(`${AUTHENTIK_DOMAIN:-auth.example.invalid}`)
+      - traefik.http.routers.authentik.entrypoints=websecure
+      - traefik.http.routers.authentik.tls=true
+      - traefik.http.routers.authentik.tls.certresolver=letsencrypt
+      - traefik.http.services.authentik.loadbalancer.server.port=9000
+
+  authentik-worker:
+    <<: *default
+    profiles:
+      - authentik
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.2}
+    command: worker
+    depends_on:
+      - authentik-postgresql
+      - authentik-redis
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:-}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+    volumes:
+      - authentik-media:/media
+      - authentik-custom-templates:/templates
+
+volumes:
+  authentik-custom-templates:
+  authentik-media:
+  authentik-postgresql:
+  authentik-redis:
+  management-data:
+  peer-data:
+  signal-data:
+  traefik-certs:
+  proxy-certs:
+
+networks:
+  netbird:
+    driver: bridge

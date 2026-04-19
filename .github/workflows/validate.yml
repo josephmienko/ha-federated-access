@@ -1,0 +1,38 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run shell syntax checks
+        run: bash -n scripts/*.sh netbird/*.sh
+
+      - name: Run Python syntax checks
+        run: python3 -m py_compile scripts/*.py
+
+      - name: Run JavaScript syntax checks
+        run: |
+          node --check homeassistant/auth_oidc/static/injection.js
+          node --check homeassistant/auth_oidc/static/ha-branding-overrides.js
+
+      - name: Verify Home Assistant OIDC patch
+        run: |
+          mkdir -p .tmp/hass-oidc-auth
+          curl -L \
+            https://codeload.github.com/christiaangoossens/hass-oidc-auth/tar.gz/refs/tags/v0.6.5-alpha \
+            -o .tmp/hass-oidc-auth.tar.gz
+          tar -xzf .tmp/hass-oidc-auth.tar.gz -C .tmp/hass-oidc-auth --strip-components=1
+          patch --dry-run -p1 -d .tmp/hass-oidc-auth < patches/hass-oidc-auth-subject-link.patch

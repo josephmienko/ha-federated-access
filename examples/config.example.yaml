@@ -1,0 +1,27 @@
+system:
+  timezone: "America/Los_Angeles"
+  state_dir: "/var/lib/ha-federated-access"
+  log_dir: "/var/log/ha-federated-access"
+
+network:
+  pi:
+    deploy_host: "homeassistant.local"
+    expected_primary_ip: "192.168.1.10"
+    interfaces:
+      - name: "eth0"
+        ip: "192.168.1.10"
+
+stage2:
+  stack_root: "/opt/homeassistant"
+
+  homeassistant:
+    config_dir: "/opt/homeassistant/config"
+    port: 8123
+
+  docker:
+    compose_service_name: "homeassistant-stack.service"
+
+netbird:
+  enabled: true
+  stack_root: "/opt/ha-federated-access/netbird"
+  compose_service_name: "ha-federated-access-netbird.service"

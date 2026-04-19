@@ -1,0 +1,1056 @@
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/__init__.py mod/custom_components/auth_oidc/__init__.py
+--- orig/custom_components/auth_oidc/__init__.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/__init__.py	2026-04-19 00:21:46
+@@ -16,6 +16,7 @@
+     CLIENT_SECRET,
+     DISCOVERY_URL,
+     DISPLAY_NAME,
++    BRANDING,
+     ID_TOKEN_SIGNING_ALGORITHM,
+     GROUPS_SCOPE,
+     ADDITIONAL_SCOPES,
+@@ -25,6 +26,7 @@
+     NETWORK,
+     FEATURES_INCLUDE_GROUPS_SCOPE,
+     FEATURES_FORCE_HTTPS,
++    FEATURES_DISABLE_FRONTEND_CHANGES,
+ )
+ 
+ # pylint: enable=useless-import-alias
+@@ -33,6 +35,7 @@
+ from .endpoints.redirect import OIDCRedirectView
+ from .endpoints.finish import OIDCFinishView
+ from .endpoints.callback import OIDCCallbackView
++from .endpoints.injected_auth_page import OIDCInjectedAuthPage
+ 
+ from .oidc_client import OIDCClient
+ from .provider import OpenIDAuthProvider
+@@ -101,21 +104,28 @@
+     # Register the views
+     name = config[DOMAIN].get(DISPLAY_NAME, DEFAULT_TITLE)
+     force_https = features_config.get(FEATURES_FORCE_HTTPS, False)
++    is_frontend_injection_enabled = not features_config.get(
++        FEATURES_DISABLE_FRONTEND_CHANGES, False
++    )
+ 
+     hass.http.register_view(OIDCWelcomeView(name))
+     hass.http.register_view(OIDCRedirectView(oidc_client, force_https))
+     hass.http.register_view(OIDCCallbackView(oidc_client, provider, force_https))
+     hass.http.register_view(OIDCFinishView())
+ 
+-    await hass.http.async_register_static_paths(
+-        [
+-            StaticPathConfig(
+-                "/auth/oidc/static/style.css",
+-                hass.config.path("custom_components/auth_oidc/static/style.css"),
+-                cache_headers=False,
+-            ),
+-        ]
+-    )
++    if is_frontend_injection_enabled:
++        branding = my_config.get(BRANDING)
++        await OIDCInjectedAuthPage.inject(hass, name, force_https, branding)
++    else:
++        await hass.http.async_register_static_paths(
++            [
++                StaticPathConfig(
++                    "/auth/oidc/static/style.css",
++                    hass.config.path("custom_components/auth_oidc/static/style.css"),
++                    cache_headers=False,
++                ),
++            ]
++        )
+ 
+     _LOGGER.info("Registered OIDC views")
+ 
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/config.py mod/custom_components/auth_oidc/config.py
+--- orig/custom_components/auth_oidc/config.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/config.py	2026-04-19 00:21:34
+@@ -6,19 +6,23 @@
+ CLIENT_SECRET = "client_secret"
+ DISCOVERY_URL = "discovery_url"
+ DISPLAY_NAME = "display_name"
++BRANDING = "branding"
+ ID_TOKEN_SIGNING_ALGORITHM = "id_token_signing_alg"
+ GROUPS_SCOPE = "groups_scope"
+ ADDITIONAL_SCOPES = "additional_scopes"
+ FEATURES = "features"
+ FEATURES_AUTOMATIC_USER_LINKING = "automatic_user_linking"
++FEATURES_BOOTSTRAP_VERIFIED_EMAIL_ONCE = "bootstrap_verified_email_once"
+ FEATURES_AUTOMATIC_PERSON_CREATION = "automatic_person_creation"
+ FEATURES_DISABLE_PKCE = "disable_rfc7636"
+ FEATURES_INCLUDE_GROUPS_SCOPE = "include_groups_scope"
+ FEATURES_FORCE_HTTPS = "force_https"
++FEATURES_DISABLE_FRONTEND_CHANGES = "disable_frontend_changes"
+ CLAIMS = "claims"
+ CLAIMS_DISPLAY_NAME = "display_name"
+ CLAIMS_USERNAME = "username"
+ CLAIMS_GROUPS = "groups"
++CLAIMS_EMAIL = "email"
+ ROLES = "roles"
+ ROLE_ADMINS = "admin"
+ ROLE_USERS = "user"
+@@ -42,6 +46,8 @@
+                 vol.Required(DISCOVERY_URL): vol.Coerce(str),
+                 # Which name should be shown on the login screens?
+                 vol.Optional(DISPLAY_NAME): vol.Coerce(str),
++                # Optional auth-page branding payload serialized into window.ha_branding_overrides.auth
++                vol.Optional(BRANDING): vol.Coerce(dict),
+                 # Should we enforce a specific signing algorithm on the id tokens?
+                 # Defaults to RS256/RSA-pubkey
+                 vol.Optional(ID_TOKEN_SIGNING_ALGORITHM): vol.Coerce(str),
+@@ -58,6 +64,11 @@
+                         # Automatically links users to the HA user based on OIDC username claim
+                         # See provider.py for explanation
+                         vol.Optional(FEATURES_AUTOMATIC_USER_LINKING): vol.Coerce(bool),
++                        # Bootstrap a subject link once from a verified email address
++                        # and persist issuer+subject afterwards
++                        vol.Optional(
++                            FEATURES_BOOTSTRAP_VERIFIED_EMAIL_ONCE
++                        ): vol.Coerce(bool),
+                         # Automatically creates a person entry for your new OIDC user
+                         # See provider.py for explanation
+                         vol.Optional(FEATURES_AUTOMATIC_PERSON_CREATION): vol.Coerce(
+@@ -74,6 +85,10 @@
+                         vol.Optional(FEATURES_FORCE_HTTPS, default=False): vol.Coerce(
+                             bool
+                         ),
++                        # Disable auth-page JavaScript injection
++                        vol.Optional(
++                            FEATURES_DISABLE_FRONTEND_CHANGES, default=False
++                        ): vol.Coerce(bool),
+                     }
+                 ),
+                 # Determine which specific claims will be used from the id_token
+@@ -86,6 +101,8 @@
+                         vol.Optional(CLAIMS_USERNAME): vol.Coerce(str),
+                         # Which claim should we use to obtain the group(s) from OIDC?
+                         vol.Optional(CLAIMS_GROUPS): vol.Coerce(str),
++                        # Which claim should we use to obtain the email from OIDC?
++                        vol.Optional(CLAIMS_EMAIL): vol.Coerce(str),
+                     }
+                 ),
+                 # Determine which specific group values will be mapped to which roles
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/endpoints/callback.py mod/custom_components/auth_oidc/endpoints/callback.py
+--- orig/custom_components/auth_oidc/endpoints/callback.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/endpoints/callback.py	2026-04-19 00:24:28
+@@ -1,5 +1,7 @@
+ """Callback route to return the user to after external OIDC interaction."""
+ 
++import urllib.parse
++
+ from homeassistant.components.http import HomeAssistantView
+ from aiohttp import web
+ from ..oidc_client import OIDCClient
+@@ -67,6 +69,14 @@
+             return web.Response(text=view_html, content_type="text/html")
+ 
+         code = await self.oidc_provider.async_save_user_info(user_details)
++        finish_params = {"code": code}
++        session_token = user_details.get("session_token")
++        if session_token:
++            finish_params["session_token"] = session_token
++
+         return web.HTTPFound(
+-            get_url("/auth/oidc/finish?code=" + code, self.force_https)
++            get_url(
++                "/auth/oidc/finish?" + urllib.parse.urlencode(finish_params),
++                self.force_https,
++            )
+         )
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/endpoints/finish.py mod/custom_components/auth_oidc/endpoints/finish.py
+--- orig/custom_components/auth_oidc/endpoints/finish.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/endpoints/finish.py	2026-04-19 00:24:28
+@@ -1,5 +1,7 @@
+ """Finish route to allow the user to view their code."""
+ 
++import urllib.parse
++
+ from homeassistant.components.http import HomeAssistantView
+ from aiohttp import web
+ from ..helpers import get_view
+@@ -26,7 +28,10 @@
+             )
+             return web.Response(text=view_html, content_type="text/html")
+ 
+-        view_html = await get_view("finish", {"code": code})
++        session_token = request.query.get("session_token")
++        view_html = await get_view(
++            "finish", {"code": code, "session_token": session_token}
++        )
+         return web.Response(text=view_html, content_type="text/html")
+ 
+     async def post(self, request: web.Request) -> web.Response:
+@@ -35,13 +40,18 @@
+         # Get code from the message body
+         data = await request.post()
+         code = data.get("code")
++        session_token = data.get("session_token")
+ 
+         if not code:
+             return web.Response(text="No code received", status=500)
+ 
++        query_params = {"storeToken": "true"}
++        if session_token:
++            query_params["session_token"] = session_token
++
+         # Return redirect to the main page for sign in with a cookie
+         return web.HTTPFound(
+-            location="/?storeToken=true",
++            location="/auth/authorize?" + urllib.parse.urlencode(query_params),
+             headers={
+                 # Set a cookie to enable autologin on only the specific path used
+                 # for the POST request, with all strict parameters set
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/endpoints/injected_auth_page.py mod/custom_components/auth_oidc/endpoints/injected_auth_page.py
+--- orig/custom_components/auth_oidc/endpoints/injected_auth_page.py	1969-12-31 16:00:00
++++ mod/custom_components/auth_oidc/endpoints/injected_auth_page.py	2026-04-19 00:27:18
+@@ -0,0 +1,211 @@
++"""Injected authorization page, replacing the original."""
++
++import base64
++import json
++import logging
++from functools import partial
++from pathlib import Path
++from urllib.parse import quote, unquote
++
++from aiofiles import open as async_open
++from aiohttp import web
++from homeassistant.components.http import HomeAssistantView, StaticPathConfig
++from homeassistant.core import HomeAssistant
++
++from .welcome import PATH as WELCOME_PATH
++from ..helpers import get_url
++
++PATH = "/auth/authorize"
++
++_LOGGER = logging.getLogger(__name__)
++
++
++async def read_file(path: str) -> str:
++    """Read a file from the static path."""
++    async with async_open(path, mode="r") as f:
++        return await f.read()
++
++
++def script_var_assignment(name: str, value) -> str:
++    """Safely serialize a window assignment into an inline script."""
++    payload = json.dumps(value, separators=(",", ":")).replace("<", "\\u003c")
++    return f"<script>window.{name} = {payload};</script>"
++
++
++def auth_branding_assignment(branding: dict | None) -> str:
++    """Serialize auth branding using the ha-branding-overrides config seam."""
++    if not isinstance(branding, dict) or not branding:
++        return ""
++
++    auth_branding = (
++        branding.get("auth") if isinstance(branding.get("auth"), dict) else branding
++    )
++    return script_var_assignment(
++        "ha_branding_overrides",
++        {"auth": {"enabled": True, **auth_branding}},
++    )
++
++
++def build_static_paths(static_root: Path) -> list[StaticPathConfig]:
++    """Build auth_oidc static routes, including optional branding assets."""
++    static_paths = [
++        StaticPathConfig(
++            "/auth/oidc/static/injection.js",
++            str(static_root / "injection.js"),
++            cache_headers=False,
++        ),
++        StaticPathConfig(
++            "/auth/oidc/static/style.css",
++            str(static_root / "style.css"),
++            cache_headers=False,
++        ),
++    ]
++
++    for route, filename in (
++        ("/auth/oidc/static/ha-branding-overrides.js", "ha-branding-overrides.js"),
++        ("/auth/oidc/static/favicon-32.png", "favicon-32.png"),
++        ("/auth/oidc/static/favicon-192.png", "favicon-192.png"),
++        ("/auth/oidc/static/auth-logo-light.svg", "auth-logo-light.svg"),
++        ("/auth/oidc/static/auth-logo-dark.svg", "auth-logo-dark.svg"),
++        ("/auth/oidc/static/logo.png", "logo.png"),
++        ("/auth/oidc/static/logo.svg", "logo.svg"),
++        ("/auth/oidc/static/logo-light.svg", "logo-light.svg"),
++        ("/auth/oidc/static/logo-dark.svg", "logo-dark.svg"),
++    ):
++        asset_path = static_root / filename
++        if asset_path.is_file():
++            static_paths.append(
++                StaticPathConfig(
++                    route,
++                    str(asset_path),
++                    cache_headers=False,
++                )
++            )
++
++    return static_paths
++
++
++async def frontend_injection(
++    hass: HomeAssistant,
++    sso_name: str,
++    force_https: bool,
++    branding: dict | None = None,
++) -> None:
++    """Inject new frontend code into /auth/authorize."""
++    router = hass.http.app.router
++    frontend_path = None
++
++    for resource in router.resources():
++        if resource.canonical != "/auth/authorize":
++            continue
++
++        # This path does not work, effectively disabling the old matcher.
++        resource.add_prefix("/auth/oidc/unused")
++
++        # Get the original frontend path from this resource to obtain the GET route.
++        routes = iter(resource)
++        route = next(
++            (r for r in routes if r.method == "GET"),
++            None,
++        )
++
++        if route is not None:
++            if not route.handler or not isinstance(route.handler, partial):
++                _LOGGER.warning(
++                    "Unexpected route handler type %s for /auth/authorize",
++                    type(route.handler),
++                )
++                continue
++
++            # The original frontend path is the first argument of the handler.
++            frontend_path = route.handler.args[0]
++            break
++
++    # Get the path to the original frontend resource.
++    if frontend_path is None:
++        _LOGGER.info(
++            "Failed to find GET route for /auth/authorize, cannot inject OIDC frontend code"
++        )
++        return
++
++    # Inject our scripts into the existing frontend code.
++    frontend_code = await read_file(frontend_path)
++    static_root = Path(hass.config.path("custom_components/auth_oidc/static"))
++    branding_js = auth_branding_assignment(branding)
++    sso_name_js = script_var_assignment("sso_name", sso_name)
++    branding_module_js = (
++        "<script src='/auth/oidc/static/ha-branding-overrides.js?v=1'></script>"
++        if (static_root / "ha-branding-overrides.js").is_file()
++        else ""
++    )
++    injection_js = "<script src='/auth/oidc/static/injection.js?v=12'></script>"
++    frontend_code = frontend_code.replace(
++        "</body>",
++        f"{branding_js}{sso_name_js}{branding_module_js}{injection_js}</body>",
++    )
++
++    await hass.http.async_register_static_paths(build_static_paths(static_root))
++
++    # If everything is successful, register a fake view that returns the modified HTML.
++    hass.http.register_view(OIDCInjectedAuthPage(frontend_code, force_https))
++    _LOGGER.info("Performed OIDC frontend injection")
++
++
++class OIDCInjectedAuthPage(HomeAssistantView):
++    """OIDC Plugin Injected Auth Page."""
++
++    requires_auth = False
++    url = PATH
++    name = "auth:oidc:authorize_page"
++
++    def __init__(self, html: str, force_https: bool) -> None:
++        """Initialize the injected auth page."""
++        self.html = html
++        self.force_https = force_https
++
++    @staticmethod
++    async def inject(
++        hass: HomeAssistant,
++        sso_name: str,
++        force_https: bool,
++        branding: dict | None = None,
++    ) -> None:
++        """Inject the OIDC auth page into the frontend."""
++        try:
++            await frontend_injection(hass, sso_name, force_https, branding)
++        except Exception as e:  # pylint: disable=broad-except
++            _LOGGER.error("Failed to inject OIDC auth page: %s", e)
++
++    @staticmethod
++    def _should_do_oidc_redirect(req: web.Request) -> bool:
++        """Check if we should redirect to the OIDC flow."""
++        # Set when we return from finish.
++        if req.query.get("skip_oidc_redirect") == "true":
++            return False
++
++        # Set whenever you directly do /?skip_oidc_redirect=true,
++        # for example when you click the "other" button on the welcome screen.
++        redirect_uri = req.query.get("redirect_uri")
++        if not redirect_uri:
++            return False
++
++        # Handle both encoded and plain redirect_uri values.
++        decoded_redirect_uri = unquote(redirect_uri)
++        return "skip_oidc_redirect=true" not in decoded_redirect_uri
++
++    def _get_welcome_redirect_location(self, req: web.Request) -> str:
++        """Build the welcome URL for the injected auth page redirect."""
++        encoded_current_url = quote(
++            base64.b64encode(str(req.url).encode("utf-8")).decode("ascii")
++        )
++        return get_url(
++            f"{WELCOME_PATH}?redirect_uri={encoded_current_url}",
++            self.force_https,
++        )
++
++    async def get(self, req: web.Request) -> web.Response:
++        """Return the original page or redirect into the OIDC flow."""
++        if self._should_do_oidc_redirect(req):
++            raise web.HTTPFound(location=self._get_welcome_redirect_location(req))
++
++        return web.Response(text=self.html, content_type="text/html")
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/endpoints/redirect.py mod/custom_components/auth_oidc/endpoints/redirect.py
+--- orig/custom_components/auth_oidc/endpoints/redirect.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/endpoints/redirect.py	2026-04-19 00:24:28
+@@ -21,12 +21,16 @@
+         self.oidc_client = oidc_client
+         self.force_https = force_https
+ 
+-    async def get(self, _: web.Request) -> web.Response:
++    async def get(self, request: web.Request) -> web.Response:
+         """Receive response."""
+ 
+         try:
+             redirect_uri = get_url("/auth/oidc/callback", self.force_https)
+-            auth_url = await self.oidc_client.async_get_authorization_url(redirect_uri)
++            session_token = request.rel_url.query.get("session_token")
++            auth_url = await self.oidc_client.async_get_authorization_url(
++                redirect_uri,
++                session_token=session_token,
++            )
+ 
+             if auth_url:
+                 raise web.HTTPFound(auth_url)
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/oidc_client.py mod/custom_components/auth_oidc/oidc_client.py
+--- orig/custom_components/auth_oidc/oidc_client.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/oidc_client.py	2026-04-19 00:24:43
+@@ -18,6 +18,7 @@
+     CLAIMS_DISPLAY_NAME,
+     CLAIMS_USERNAME,
+     CLAIMS_GROUPS,
++    CLAIMS_EMAIL,
+     ROLE_ADMINS,
+     ROLE_USERS,
+     NETWORK_TLS_VERIFY,
+@@ -109,6 +110,7 @@
+         self.display_name_claim = claims.get(CLAIMS_DISPLAY_NAME, "name")
+         self.username_claim = claims.get(CLAIMS_USERNAME, "preferred_username")
+         self.groups_claim = claims.get(CLAIMS_GROUPS, "groups")
++        self.email_claim = claims.get(CLAIMS_EMAIL, "email")
+         self.user_role = roles.get(ROLE_USERS, None)
+         self.admin_role = roles.get(ROLE_ADMINS, "admins")
+         self.tls_verify = network.get(NETWORK_TLS_VERIFY, True)
+@@ -348,7 +350,9 @@
+             _LOGGER.warning("JWT verification failed: %s", e)
+             return None
+ 
+-    async def async_get_authorization_url(self, redirect_uri: str) -> Optional[str]:
++    async def async_get_authorization_url(
++        self, redirect_uri: str, session_token: str | None = None
++    ) -> Optional[str]:
+         """Generates the authorization URL for the OIDC flow."""
+         try:
+             if self.discovery_document is None:
+@@ -367,7 +371,11 @@
+             )
+ 
+             # Save all of them for later verification
+-            self.flows[state] = {"code_verifier": code_verifier, "nonce": nonce}
++            self.flows[state] = {
++                "code_verifier": code_verifier,
++                "nonce": nonce,
++                "session_token": session_token,
++            }
+ 
+             # Construct the params
+             query_params = {
+@@ -408,6 +416,8 @@
+                 self.groups_claim,
+                 self.display_name_claim,
+                 self.username_claim,
++                self.email_claim,
++                "email_verified",
+             ):
+                 if claim not in id_token and claim in userinfo:
+                     id_token[claim] = userinfo[claim]
+@@ -428,20 +438,12 @@
+ 
+         # Create a user details dict based on the contents of the id_token & userinfo
+         return {
+-            # Subject Identifier. A locally unique and never reassigned identifier within the
+-            # Issuer for the End-User, which is intended to be consumed by the Client
+-            # Only unique per issuer, so we combine it with the issuer and hash it.
+-            # This might allow multiple OIDC providers to be used with this integration.
+-            "sub": hashlib.sha256(
+-                f"{self.discovery_document['issuer']}.{id_token.get('sub')}".encode(
+-                    "utf-8"
+-                )
+-            ).hexdigest(),
+-            # Display name, configurable
++            "issuer": self.discovery_document["issuer"],
++            "sub": id_token.get("sub"),
+             "display_name": id_token.get(self.display_name_claim),
+-            # Username, configurable
+             "username": id_token.get(self.username_claim),
+-            # Role
++            "email": id_token.get(self.email_claim),
++            "email_verified": bool(id_token.get("email_verified", False)),
+             "role": role,
+         }
+ 
+@@ -501,6 +503,7 @@
+ 
+             access_token = token_response.get("access_token")
+             data = await self.parse_user_details(id_token, access_token)
++            data["session_token"] = flow.get("session_token")
+ 
+             # Log which details were obtained for debugging
+             # Also log the original subject identifier such that you can look it up in your provider
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/provider.py mod/custom_components/auth_oidc/provider.py
+--- orig/custom_components/auth_oidc/provider.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/provider.py	2026-04-19 00:26:12
+@@ -2,6 +2,7 @@
+ Allow access to users based on login with an external OpenID Connect Identity Provider (IdP).
+ """
+ 
++import hashlib
+ import logging
+ 
+ from typing import Dict, Optional
+@@ -27,10 +28,12 @@
+ from .config import (
+     FEATURES,
+     FEATURES_AUTOMATIC_USER_LINKING,
++    FEATURES_BOOTSTRAP_VERIFIED_EMAIL_ONCE,
+     FEATURES_AUTOMATIC_PERSON_CREATION,
+     DEFAULT_TITLE,
+ )
+ from .stores.code_store import CodeStore
++from .stores.subject_link_store import SubjectLinkStore
+ from .types import UserDetails
+ 
+ _LOGGER = logging.getLogger(__name__)
+@@ -67,8 +70,9 @@
+             },
+         )
+ 
+-        self._user_meta: dict[UserDetails] = {}
++        self._user_meta: dict[str, UserDetails] = {}
+         self._code_store: CodeStore | None = None
++        self._subject_link_store: SubjectLinkStore | None = None
+         self._init_lock = asyncio.Lock()
+ 
+         features = config.get(
+@@ -80,6 +84,9 @@
+         # False by default to always make new accounts for OIDC users
+         # Turn this on to migrate from HA accounts to OIDC
+         self.user_linking = features.get(FEATURES_AUTOMATIC_USER_LINKING, False)
++        self.bootstrap_verified_email_once = features.get(
++            FEATURES_BOOTSTRAP_VERIFIED_EMAIL_ONCE, False
++        )
+ 
+         # Create person entries automatically?
+         # True by default to create a person for each new user (just like normal HA)
+@@ -99,6 +106,10 @@
+             store = CodeStore(self.hass)
+             await store.async_load()
+             self._code_store = store
++
++            link_store = SubjectLinkStore(self.hass)
++            await link_store.async_load()
++            self._subject_link_store = link_store
+             self._user_meta = {}
+ 
+         # Listen for user creation events
+@@ -115,9 +126,12 @@
+         if user_data is None:
+             return None
+ 
+-        sub = user_data["sub"]
+-        self._user_meta[sub] = user_data
+-        return sub
++        subject_key = self._subject_key(user_data["issuer"], user_data["sub"])
++        self._user_meta[subject_key] = user_data
++        self._user_meta[
++            self._legacy_subject_hash(user_data["issuer"], user_data["sub"])
++        ] = user_data
++        return subject_key
+ 
+     async def async_save_user_info(self, user_info: dict[str, dict | str]) -> str:
+         """Save user info and return a code."""
+@@ -127,6 +141,98 @@
+ 
+         return await self._code_store.async_generate_code_for_userinfo(user_info)
+ 
++    def _subject_key(self, issuer: str, sub: str) -> str:
++        """Build the in-memory lookup key for a subject."""
++        return f"{issuer}|{sub}"
++
++    def _legacy_subject_hash(self, issuer: str, sub: str) -> str:
++        """Build the upstream hashed subject for compatibility with existing credentials."""
++        return hashlib.sha256(f"{issuer}.{sub}".encode("utf-8")).hexdigest()
++
++    async def _async_find_credential_by_id(
++        self, credential_id: str
++    ) -> Optional[Credentials]:
++        """Find a credential by ID for this provider."""
++        for credential in await self.async_credentials():
++            if credential.id == credential_id:
++                return credential
++        return None
++
++    async def _async_find_existing_subject_credential(
++        self, issuer: str, sub: str
++    ) -> tuple[Optional[Credentials], Optional[str]]:
++        """Find an existing credential for the current subject."""
++        legacy_subject = self._legacy_subject_hash(issuer, sub)
++        for credential in await self.async_credentials():
++            credential_sub = credential.data.get("sub")
++            credential_issuer = credential.data.get("issuer")
++
++            if credential_issuer == issuer and credential_sub == sub:
++                return credential, "subject"
++
++            if credential_issuer in (None, "") and credential_sub == legacy_subject:
++                return credential, "legacy_subject"
++
++        return None, None
++
++    async def _async_save_subject_link(
++        self, meta: UserDetails, credential: Credentials, bootstrap_method: str
++    ) -> None:
++        """Persist the durable issuer+subject link."""
++        if self._subject_link_store is None:
++            return
++
++        user = await self.hass.auth.async_get_user_by_credentials(credential)
++        await self._subject_link_store.async_set_link(
++            issuer=meta["issuer"],
++            sub=meta["sub"],
++            credential_id=credential.id,
++            user_id=user.id if user is not None else None,
++            email_at_link=meta.get("email"),
++            bootstrap_method=bootstrap_method,
++        )
++
++    async def _async_find_user_by_verified_email(
++        self, email: Optional[str]
++    ) -> Optional[User]:
++        """Find an existing local HA user by verified email bootstrap rule."""
++        if email is None:
++            return None
++
++        normalized_email = email.strip().casefold()
++        if not normalized_email:
++            return None
++
++        matches = []
++        users = await self.store.async_get_users()
++        for user in users:
++            if user.system_generated:
++                continue
++
++            for credential in user.credentials:
++                if credential.auth_provider_type != HASS_PROVIDER_TYPE:
++                    continue
++
++                username = credential.data.get("username")
++                if (
++                    isinstance(username, str)
++                    and username.strip().casefold() == normalized_email
++                ):
++                    matches.append(user)
++                    break
++
++        if len(matches) > 1:
++            _LOGGER.warning(
++                "Verified-email bootstrap is ambiguous for %s; refusing automatic link.",
++                email,
++            )
++            return None
++
++        if matches:
++            return matches[0]
++
++        return None
++
+     async def _async_find_user_by_username(self, username: str) -> Optional[User]:
+         """Find a user by username."""
+         users = await self.store.async_get_users()
+@@ -155,16 +261,19 @@
+         user_id = event.data["user_id"]
+         user = await self.store.async_get_user(user_id)
+ 
+-        # Get the first credential, if it's not ours, return
+         if not user.credentials or len(user.credentials) == 0:
+             return
+ 
+-        credential = user.credentials[0]
+-        if not (
+-            credential.auth_provider_type == self.type
+-            and credential.auth_provider_id == self.id
+-        ):
+-            # Not mine, return
++        credential = None
++        for candidate in user.credentials:
++            if (
++                candidate.auth_provider_type == self.type
++                and candidate.auth_provider_id == self.id
++            ):
++                credential = candidate
++                break
++
++        if credential is None:
+             return
+ 
+         # Audit log the user creation
+@@ -174,6 +283,17 @@
+             credential.data["sub"],
+         )
+ 
++        if (
++            self._subject_link_store is not None
++            and credential.data.get("issuer")
++            and credential.data.get("sub")
++        ):
++            await self._subject_link_store.async_set_user_id(
++                credential.data["issuer"],
++                credential.data["sub"],
++                user.id,
++            )
++
+         # If person creation is enabled, add a person for this user
+         if self.create_persons:
+             user_meta = await self.async_user_meta_for_credentials(credential)
+@@ -210,29 +330,75 @@
+         self, flow_result: dict[str, str]
+     ) -> Credentials:
+         """Get credentials based on the flow result."""
+-        sub = flow_result["sub"]
+-        meta = self._user_meta.get(sub)
++        subject_key = flow_result["subject_key"]
++        meta = self._user_meta.get(subject_key)
++        if meta is None:
++            raise InvalidAuthError
+ 
++        issuer = meta["issuer"]
++        sub = meta["sub"]
++
+         # Audit logging for the login that is about to occur
+         _LOGGER.info(
+             "Logged in user through OIDC: %s, %s", meta["sub"], meta["display_name"]
+         )
+ 
+-        # Iterate over previously created credentials to find one with the same sub
+-        for credential in await self.async_credentials():
+-            # When logging in again, use the subject to check if the credential exist
+-            # OpenID spec says that sub is the only claim we can rely on, as username
+-            # might change over time.
+-            if credential.data.get("sub") == sub:
++        if self._subject_link_store is None:
++            await self.async_initialize()
++            assert self._subject_link_store is not None
++
++        link = await self._subject_link_store.async_get_link(issuer, sub)
++        if link is not None:
++            credential = await self._async_find_credential_by_id(link["credential_id"])
++            if credential is not None:
++                if not link.get("user_id"):
++                    user = await self.hass.auth.async_get_user_by_credentials(
++                        credential
++                    )
++                    if user is not None:
++                        await self._subject_link_store.async_set_user_id(
++                            issuer, sub, user.id
++                        )
++                await self._subject_link_store.async_touch(issuer, sub)
+                 return credential
+ 
++            await self._subject_link_store.async_remove_by_credential_id(
++                link["credential_id"]
++            )
++
++        credential, match_source = await self._async_find_existing_subject_credential(
++            issuer, sub
++        )
++        if credential is not None:
++            await self._async_save_subject_link(
++                meta, credential, match_source or "existing_subject"
++            )
++            return credential
++
+         # If no credential was found, create a new one
+         # Username cannot be supplied here as it won't be shown by Home Assistant regardless
+         # Source: homeassistant/components/config/auth.py, line 162
+-        credential = self.async_create_credentials({"sub": sub})
++        credential = self.async_create_credentials({"issuer": issuer, "sub": sub})
+ 
++        if (
++            self.bootstrap_verified_email_once
++            and meta.get("email_verified") is True
++            and meta.get("email")
++        ):
++            user = await self._async_find_user_by_verified_email(meta.get("email"))
++            if user is not None:
++                _LOGGER.info(
++                    "User already exists, linking credential for OIDC to existing user "
++                    + "with verified email '%s'.",
++                    meta["email"],
++                )
++
++                await self.store.async_link_user(user, credential)
++                await self._async_save_subject_link(meta, credential, "verified_email")
++                return credential
++
+         # If we have user linking enabled, try to link the user here
+-        if self.user_linking:
++        if self.user_linking and meta.get("username"):
+             user = await self._async_find_user_by_username(meta["username"])
+             if user is not None:
+                 _LOGGER.info(
+@@ -244,10 +410,20 @@
+                 # Link the credential to the existing user
+                 # Will set the credential isNew = false
+                 await self.store.async_link_user(user, credential)
++                await self._async_save_subject_link(meta, credential, "username")
++                return credential
+ 
+         # If the credential is new, HA will automatically create a new user for us
++        await self._async_save_subject_link(meta, credential, "new_user")
+         return credential
+ 
++    async def async_will_remove_credentials(self, credentials: Credentials) -> None:
++        """Remove any stored issuer+subject link before deleting credentials."""
++        if self._subject_link_store is None:
++            return
++
++        await self._subject_link_store.async_remove_by_credential_id(credentials.id)
++
+     async def async_user_meta_for_credentials(
+         self, credentials: Credentials
+     ) -> UserMeta:
+@@ -256,8 +432,12 @@
+         Currently, supports name, is_active, group and local_only.
+         """
+ 
+-        sub = credentials.data["sub"]
+-        meta = self._user_meta.get(sub, {})
++        issuer = credentials.data.get("issuer")
++        sub = credentials.data.get("sub")
++        if issuer is not None and sub is not None:
++            meta = self._user_meta.get(self._subject_key(issuer, sub), {})
++        else:
++            meta = self._user_meta.get(sub, {})
+ 
+         role = meta.get("role")
+         return UserMeta(
+@@ -280,11 +460,11 @@
+ 
+         # Actually look up the auth provider after,
+         # this doesn't take a lot of time (regardless of it's in there or not)
+-        sub = await self._auth_provider.async_get_subject(code)
+-        if sub:
++        subject_key = await self._auth_provider.async_get_subject(code)
++        if subject_key:
+             return await self.async_finish(
+                 {
+-                    "sub": sub,
++                    "subject_key": subject_key,
+                 }
+             )
+ 
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/stores/subject_link_store.py mod/custom_components/auth_oidc/stores/subject_link_store.py
+--- orig/custom_components/auth_oidc/stores/subject_link_store.py	1969-12-31 16:00:00
++++ mod/custom_components/auth_oidc/stores/subject_link_store.py	2026-04-19 00:25:04
+@@ -0,0 +1,113 @@
++"""Durable subject-link storage for OIDC credentials."""
++
++from datetime import datetime, timezone
++from typing import Optional, cast
++
++from homeassistant.core import HomeAssistant
++from homeassistant.helpers.storage import Store
++
++from ..types import SubjectLinkRecord
++
++STORAGE_VERSION = 1
++STORAGE_KEY = "auth_provider.auth_oidc.subject_links"
++
++
++class SubjectLinkStore:
++    """Persist issuer+subject to credential links."""
++
++    def __init__(self, hass: HomeAssistant) -> None:
++        self.hass = hass
++        self._store = Store[dict](
++            hass, STORAGE_VERSION, STORAGE_KEY, private=True, atomic_writes=True
++        )
++        self._data: dict | None = None
++
++    async def async_load(self) -> None:
++        """Load stored data."""
++        if (data := await self._store.async_load()) is None:
++            data = {"subjects": {}}
++
++        if not isinstance(data, dict):
++            data = {"subjects": {}}
++
++        subjects = data.get("subjects")
++        if not isinstance(subjects, dict):
++            subjects = {}
++
++        self._data = {"subjects": subjects}
++
++    async def _async_save(self) -> None:
++        """Save data."""
++        if self._data is not None:
++            await self._store.async_save(self._data)
++
++    def _subjects(self) -> dict[str, dict[str, SubjectLinkRecord]]:
++        if self._data is None:
++            raise RuntimeError("Data not loaded")
++        subjects = self._data.setdefault("subjects", {})
++        return cast(dict[str, dict[str, SubjectLinkRecord]], subjects)
++
++    async def async_get_link(
++        self, issuer: str, sub: str
++    ) -> Optional[SubjectLinkRecord]:
++        """Get a stored subject link."""
++        return self._subjects().get(issuer, {}).get(sub)
++
++    async def async_set_link(
++        self,
++        issuer: str,
++        sub: str,
++        credential_id: str,
++        user_id: Optional[str],
++        email_at_link: Optional[str],
++        bootstrap_method: str,
++    ) -> None:
++        """Set or update a stored subject link."""
++        now = datetime.now(timezone.utc).isoformat()
++        issuer_links = self._subjects().setdefault(issuer, {})
++        record = dict(issuer_links.get(sub, {}))
++        record["credential_id"] = credential_id
++        record["bootstrap_method"] = bootstrap_method
++        record["last_seen_at"] = now
++        record["linked_at"] = record.get("linked_at", now)
++        record["user_id"] = user_id
++        record["email_at_link"] = email_at_link
++        issuer_links[sub] = cast(SubjectLinkRecord, record)
++        await self._async_save()
++
++    async def async_set_user_id(self, issuer: str, sub: str, user_id: str) -> None:
++        """Backfill the user ID once HA creates or links the user."""
++        record = await self.async_get_link(issuer, sub)
++        if record is None:
++            return
++
++        record["user_id"] = user_id
++        record["last_seen_at"] = datetime.now(timezone.utc).isoformat()
++        await self._async_save()
++
++    async def async_touch(self, issuer: str, sub: str) -> None:
++        """Update the last-seen timestamp for a subject link."""
++        record = await self.async_get_link(issuer, sub)
++        if record is None:
++            return
++
++        record["last_seen_at"] = datetime.now(timezone.utc).isoformat()
++        await self._async_save()
++
++    async def async_remove_by_credential_id(self, credential_id: str) -> None:
++        """Remove a stored link by credential ID."""
++        subjects = self._subjects()
++        removed = False
++
++        for issuer in list(subjects):
++            issuer_links = subjects[issuer]
++            for sub in list(issuer_links):
++                if issuer_links[sub].get("credential_id") == credential_id:
++                    del issuer_links[sub]
++                    removed = True
++
++            if not issuer_links:
++                del subjects[issuer]
++
++        if removed:
++            await self._async_save()
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/types.py mod/custom_components/auth_oidc/types.py
+--- orig/custom_components/auth_oidc/types.py	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/types.py	2026-04-19 00:24:28
+@@ -1,18 +1,27 @@
+ """Generic data types"""
+ 
+-# Dict class to give a type to the user details
+-from typing import Literal
++from typing import Literal, NotRequired, TypedDict
+ 
+ 
+-class UserDetails(dict):
++class UserDetails(TypedDict):
+     """User details representation"""
+ 
+-    # User subject, persistent identifier
++    issuer: str
+     sub: str
+-    # Full name of the user for display purposes
+-    display_name: str
+-    # Preferred username for the user, will be used when first generating the account
+-    # or to link the account on first login
+-    username: str
+-    # Home Assistant role to assign to this user
++    display_name: NotRequired[str | None]
++    username: NotRequired[str | None]
++    email: NotRequired[str | None]
++    email_verified: NotRequired[bool]
++    session_token: NotRequired[str | None]
+     role: Literal["system-admin", "system-users", "invalid"]
++
++
++class SubjectLinkRecord(TypedDict, total=False):
++    """Stored mapping from issuer+subject to credential/user metadata."""
++
++    credential_id: str
++    user_id: str | None
++    email_at_link: str | None
++    linked_at: str
++    last_seen_at: str
++    bootstrap_method: str
+diff -ruN -x __pycache__ -x *.pyc orig/custom_components/auth_oidc/views/templates/finish.html mod/custom_components/auth_oidc/views/templates/finish.html
+--- orig/custom_components/auth_oidc/views/templates/finish.html	2026-02-06 03:41:03
++++ mod/custom_components/auth_oidc/views/templates/finish.html	2026-04-19 00:24:28
+@@ -9,6 +9,9 @@
+         <h2 class="text-xl font-semibold mb-6 text-gray-800">I want to login to this browser</h2>
+         <form method="post">
+             <input type="hidden" name="code" value="{{ code }}">
++            {% if session_token %}
++            <input type="hidden" name="session_token" value="{{ session_token }}">
++            {% endif %}
+             <button type="submit"
+                 class="w-full py-2 px-4 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75">
+                 Login to Home Assistant in this browser
+@@ -28,4 +31,4 @@
+             OpenID Connect (SSO)' first.</p>
+     </div>
+ </div>
+-{% endblock %}
+\ No newline at end of file
++{% endblock %}

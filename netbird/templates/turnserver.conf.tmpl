@@ -1,0 +1,17 @@
+listening-port=3478
+listening-ip=0.0.0.0
+external-ip=${NETBIRD_TURN_EXTERNAL_IP}
+
+fingerprint
+lt-cred-mech
+realm=${NETBIRD_DOMAIN}
+server-name=${NETBIRD_DOMAIN}
+user=${NETBIRD_TURN_USER}:${NETBIRD_TURN_PASSWORD}
+
+stale-nonce
+no-loopback-peers
+no-multicast-peers
+no-cli
+
+min-port=${NETBIRD_TURN_MIN_PORT}
+max-port=${NETBIRD_TURN_MAX_PORT}

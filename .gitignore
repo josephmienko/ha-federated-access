@@ -1,0 +1,18 @@
+.DS_Store
+.env
+*.log
+__pycache__/
+*.py[cod]
+
+# Runtime output generated on target hosts.
+netbird/generated/*
+!netbird/generated/.gitkeep
+
+# Terraform local state.
+terraform/**/.terraform/
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*
+terraform/**/*.tfvars
+
+# Temporary patch test workspaces.
+.tmp/
