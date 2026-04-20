@@ -5,7 +5,7 @@ Use this checklist to ensure the user management CLI is properly configured and 
 ## Pre-Setup Phase
 
 - [ ] All three systems are running (NetBird, Authentik, Home Assistant)
-- [ ] You have command-line access to the Crooked Sentry Pi (SSH or local)
+- [ ] You have command-line access to the Home Assistant Federated Access Pi (SSH or local)
 - [ ] Python 3.8+ is available on the system
 - [ ] Docker and docker-compose are installed (for Authentik access)
 - [ ] Your `.env` file is properly configured (most variables already exist!)
@@ -55,7 +55,7 @@ Only need to add **one** variable: `HA_TOKEN`
 
 - [ ] Start Home Assistant if not running:
   ```bash
-  cd /opt/crooked-sentry
+  cd /opt/ha-federated-access
   docker compose up -d home-assistant
   ```
 
@@ -67,13 +67,13 @@ Only need to add **one** variable: `HA_TOKEN`
   - [ ] Click profile icon (bottom left corner)
   - [ ] Scroll down to "Long-Lived Access Tokens" section
   - [ ] Click "Create Token"
-  - [ ] Give it a name: `"Crooked Sentry User Management"`
+  - [ ] Give it a name: `"Home Assistant Federated Access User Management"`
   - [ ] Click "Create"
   - [ ] **Copy the token immediately** (it won't be shown again!)
 
 - [ ] Add token to `.env`
   ```bash
-  echo 'HA_TOKEN=eyJ...<your-long-token>...' >> /path/to/crooked-sentry/.env
+  echo 'HA_TOKEN=eyJ...<your-long-token>...' >> /path/to/ha-federated-access/.env
   ```
 
 - [ ] Verify it works
@@ -88,21 +88,21 @@ Only need to add **one** variable: `HA_TOKEN`
 
 - [ ] Scripts are in place
   ```bash
-  ls -la /path/to/crooked-sentry/scripts/users-cli.py
-  ls -la /path/to/crooked-sentry/scripts/users.sh
+  ls -la /path/to/ha-federated-access/scripts/users-cli.py
+  ls -la /path/to/ha-federated-access/scripts/users.sh
   # Both should exist and be executable
   ```
 
 - [ ] Make scripts executable
   ```bash
-  chmod +x /path/to/crooked-sentry/scripts/users-cli.py
-  chmod +x /path/to/crooked-sentry/scripts/users.sh
+  chmod +x /path/to/ha-federated-access/scripts/users-cli.py
+  chmod +x /path/to/ha-federated-access/scripts/users.sh
   ```
 
 - [ ] Documentation is available
   ```bash
-  ls /path/to/crooked-sentry/docs/USER-MANAGEMENT-CLI.md
-  ls /path/to/crooked-sentry/docs/USER-MANAGEMENT-INTEGRATION.md
+  ls /path/to/ha-federated-access/docs/USER-MANAGEMENT-CLI.md
+  ls /path/to/ha-federated-access/docs/USER-MANAGEMENT-INTEGRATION.md
   # Should both exist
   ```
 
@@ -111,7 +111,7 @@ Only need to add **one** variable: `HA_TOKEN`
 ### Test 1: List Users
 
 ```bash
-cd /path/to/crooked-sentry
+cd /path/to/ha-federated-access
 ./scripts/users.sh list
 ```
 
@@ -182,14 +182,14 @@ cd /path/to/crooked-sentry
 
 - [ ] `.env` file has restrictive permissions
   ```bash
-  chmod 600 /path/to/crooked-sentry/.env
-  ls -l /path/to/crooked-sentry/.env
+  chmod 600 /path/to/ha-federated-access/.env
+  ls -l /path/to/ha-federated-access/.env
   # Should show: -rw------- (600)
   ```
 
 - [ ] `.env` is in `.gitignore`
   ```bash
-  grep "\.env" /path/to/crooked-sentry/.gitignore
+  grep "\.env" /path/to/ha-federated-access/.gitignore
   # Should be present
   ```
 
@@ -226,7 +226,7 @@ cd /path/to/crooked-sentry
 - [ ] Set up logs rotation (if logging to file)
   ```bash
   # Optional: Log all user management operations
-  alias users-cli-log='./scripts/users.sh >> /var/log/crooked-sentry/user-mgmt.log 2>&1'
+  alias users-cli-log='./scripts/users.sh >> /var/log/ha-federated-access/user-mgmt.log 2>&1'
   ```
 
 ## Backup and Recovery
@@ -262,12 +262,12 @@ If you want to run the CLI from your Mac/development machine:
 
 - [ ] SSH tunnel to NetBird API
   ```bash
-  ssh -L 33073:localhost:33073 pi@crookedsentry.local &
+  ssh -L 33073:localhost:33073 pi@homeassistant.local &
   ```
 
 - [ ] SSH tunnel to Home Assistant API
   ```bash
-  ssh -L 8123:localhost:8123 pi@crookedsentry.local &
+  ssh -L 8123:localhost:8123 pi@homeassistant.local &
   ```
 
 - [ ] For Authentik: Must run on Pi or set up Docker socket tunneling

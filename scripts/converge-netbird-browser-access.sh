@@ -93,7 +93,7 @@ NETBIRD_HA_PROXY_SUBDOMAIN="${NETBIRD_HA_PROXY_SUBDOMAIN:-ha}"
 NETBIRD_PI_PEER_NAME="${NETBIRD_PI_PEER_NAME:-$(hostname -s)-pi}"
 NETBIRD_BROWSER_API_BASE_URL="${NETBIRD_BROWSER_API_BASE_URL:-http://127.0.0.1:${NETBIRD_MGMT_API_PORT:-33073}/api}"
 HA_PROXY_DOMAIN="${NETBIRD_HA_PROXY_SUBDOMAIN}.${NETBIRD_PROXY_DOMAIN:-proxy.invalid}"
-PEER_SETUP_KEY_NAME="${PEER_SETUP_KEY_NAME:-crooked-sentry-pi-peer-bootstrap}"
+PEER_SETUP_KEY_NAME="${PEER_SETUP_KEY_NAME:-ha-federated-access-pi-peer-bootstrap}"
 
 [[ "${NETBIRD_HA_PROXY_ENABLED}" == "true" ]] || {
   log "NETBIRD_HA_PROXY_ENABLED is not true. Skipping browser-access convergence."
@@ -490,7 +490,7 @@ wait_for_browser_access_url() {
 }
 
 main() {
-  log "===== crooked-sentry NetBird browser-access converge starting ====="
+  log "===== ha-federated-access NetBird browser-access converge starting ====="
   require_command curl
   require_command jq
   require_command python3
@@ -515,7 +515,7 @@ main() {
   upsert_homeassistant_proxy_service "${peer_id}"
   wait_for_browser_access_url
 
-  log "===== crooked-sentry NetBird browser-access converge completed successfully ====="
+  log "===== ha-federated-access NetBird browser-access converge completed successfully ====="
 }
 
 main "$@"

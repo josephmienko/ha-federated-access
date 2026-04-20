@@ -218,4 +218,4 @@ log "Ensuring Authentik OAuth2 providers use signing key '${AUTHENTIK_OIDC_SIGNI
 run_authentik_python "${python_script}"
 rm -f "${python_script}"
 
-log "===== crooked-sentry Authentik OAuth2 provider converge completed successfully ====="
+log "===== ha-federated-access Authentik OAuth2 provider converge completed successfully ====="

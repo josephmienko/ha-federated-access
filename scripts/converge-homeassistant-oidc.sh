@@ -90,7 +90,7 @@ AUTHENTIK_DOMAIN="${AUTHENTIK_DOMAIN:-}"
 HA_OIDC_COMPONENT_VERSION="${HA_OIDC_COMPONENT_VERSION:-v0.6.5-alpha}"
 HA_OIDC_COMPONENT_URL="${HA_OIDC_COMPONENT_URL:-}"
 HA_OIDC_COMPONENT_PATCH_FILE="${HA_OIDC_COMPONENT_PATCH_FILE:-}"
-HA_OIDC_DISPLAY_NAME="${HA_OIDC_DISPLAY_NAME:-CrookedSentry SSO}"
+HA_OIDC_DISPLAY_NAME="${HA_OIDC_DISPLAY_NAME:-Home Assistant SSO}"
 HA_OIDC_APPLICATION_SLUG="${HA_OIDC_APPLICATION_SLUG:-home-assistant}"
 HA_OIDC_DISCOVERY_URL="${HA_OIDC_DISCOVERY_URL:-https://${AUTHENTIK_DOMAIN}/application/o/${HA_OIDC_APPLICATION_SLUG}/.well-known/openid-configuration}"
 HA_OIDC_USERNAME_CLAIM="${HA_OIDC_USERNAME_CLAIM:-preferred_username}"
@@ -126,9 +126,15 @@ HA_CONFIG_BACKUP_FILE="${HA_CONFIG_DIR}/configuration.yaml.pre-homeassistant-oid
 HA_SECRETS_FILE="${HA_CONFIG_DIR}/secrets.yaml"
 HA_OIDC_COMPONENT_PARENT="${HA_CONFIG_DIR}/custom_components"
 HA_OIDC_COMPONENT_DIR="${HA_OIDC_COMPONENT_PARENT}/auth_oidc"
-HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version"
-HA_OIDC_COMPONENT_SOURCE_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-source"
-HA_OIDC_COMPONENT_PATCH_FINGERPRINT_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-patch"
+HA_OIDC_COMPONENT_MARKER_PREFIX="${HA_OIDC_COMPONENT_MARKER_PREFIX:-ha-federated-access}"
+HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.${HA_OIDC_COMPONENT_MARKER_PREFIX}-version"
+HA_OIDC_COMPONENT_SOURCE_FILE="${HA_OIDC_COMPONENT_DIR}/.${HA_OIDC_COMPONENT_MARKER_PREFIX}-source"
+HA_OIDC_COMPONENT_PATCH_FINGERPRINT_FILE="${HA_OIDC_COMPONENT_DIR}/.${HA_OIDC_COMPONENT_MARKER_PREFIX}-patch"
+if [[ "${HA_OIDC_COMPONENT_MARKER_PREFIX}" == "ha-federated-access" && ! -f "${HA_OIDC_COMPONENT_VERSION_FILE}" && -f "${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version" ]]; then
+  HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version"
+  HA_OIDC_COMPONENT_SOURCE_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-source"
+  HA_OIDC_COMPONENT_PATCH_FINGERPRINT_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-patch"
+fi
 HA_OIDC_COMPONENT_DEFAULT_URL="https://codeload.github.com/christiaangoossens/hass-oidc-auth/tar.gz/refs/tags/${HA_OIDC_COMPONENT_VERSION}"
 HA_OIDC_COMPONENT_SOURCE_URL="${HA_OIDC_COMPONENT_URL:-${HA_OIDC_COMPONENT_DEFAULT_URL}}"
 HA_OIDC_COMPONENT_DEFAULT_PATCH_FILE="${PROJECT_ROOT}/patches/hass-oidc-auth-subject-link.patch"
@@ -296,7 +302,7 @@ install_auth_oidc_component() {
   [[ -d "${source_dir}" ]] || fail "Downloaded hass-oidc-auth archive does not contain custom_components/auth_oidc."
 
   if [[ -d "${HA_OIDC_COMPONENT_DIR}" ]]; then
-    backup_dir="${HA_OIDC_COMPONENT_PARENT}/auth_oidc.pre-crooked-sentry-$(date '+%Y%m%d%H%M%S')"
+    backup_dir="${HA_OIDC_COMPONENT_PARENT}/auth_oidc.pre-ha-federated-access-$(date '+%Y%m%d%H%M%S')"
     mv "${HA_OIDC_COMPONENT_DIR}" "${backup_dir}"
     log "Backed up existing Home Assistant auth_oidc component to ${backup_dir}."
   fi
@@ -596,7 +602,7 @@ wait_for_oidc_route() {
 }
 
 main() {
-  log "===== crooked-sentry Home Assistant OIDC converge starting ====="
+  log "===== ha-federated-access Home Assistant OIDC converge starting ====="
 
   local changed_component="false"
   local changed_secret="false"
@@ -618,7 +624,7 @@ main() {
   wait_for_oidc_route
   log "OIDC quick-start URL: /auth/oidc/redirect"
   warn "This uses the unofficial hass-oidc-auth component. Keep at least one local Home Assistant owner account as a fallback."
-  log "===== crooked-sentry Home Assistant OIDC converge completed successfully ====="
+  log "===== ha-federated-access Home Assistant OIDC converge completed successfully ====="
 }
 
 main "$@"

@@ -1,6 +1,6 @@
 # User Management CLI - Implementation Summary
 
-This document summarizes the unified user management interface created for Crooked Sentry.
+This document summarizes the unified user management interface created for Home Assistant Federated Access.
 
 ## What Was Created
 
@@ -167,7 +167,7 @@ Results:
 
 1. **Set up environment variables**:
    ```bash
-   cat > /path/to/crooked-sentry/.env << 'EOF'
+   cat > /path/to/ha-federated-access/.env << 'EOF'
    NETBIRD_DOMAIN=netbird.local
    NETBIRD_MGMT_API_PORT=33073
    NETBIRD_API_TOKEN=your-token-here
@@ -194,7 +194,7 @@ Results:
 
 4. **Test the CLI**:
    ```bash
-   cd /path/to/crooked-sentry
+   cd /path/to/ha-federated-access
    ./scripts/users.sh list
    ```
 
@@ -400,7 +400,7 @@ See `docs/USER-MANAGEMENT-INTEGRATION.md` for:
 
 ## Next Steps
 
-1. **Copy all files to Crooked Sentry machine**
+1. **Copy all files to Home Assistant Federated Access machine**
 2. **Follow setup checklist**: `docs/USER-MANAGEMENT-SETUP-CHECKLIST.md`
 3. **Get API tokens** from NetBird and Home Assistant
 4. **Test with example user** using `./scripts/users.sh add`

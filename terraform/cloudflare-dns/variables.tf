@@ -7,7 +7,7 @@ variable "cloudflare_api_token" {
 
 variable "cloudflare_zone_id" {
   type        = string
-  description = "Cloudflare zone ID for crookedsentry.net"
+  description = "Cloudflare zone ID for the managed DNS zone"
 }
 
 variable "cloudflare_zone_name" {

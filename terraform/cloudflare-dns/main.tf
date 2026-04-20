@@ -22,7 +22,7 @@ locals {
   authentik_record_name     = local.authentik_domain == var.cloudflare_zone_name ? "@" : trimsuffix(local.authentik_domain, ".${var.cloudflare_zone_name}")
 }
 
-# Apex landing hostname for Crooked Sentry. Traefik on the NetBird host owns
+# Apex landing hostname for browser onboarding. Traefik on the NetBird host owns
 # the redirect so the apex remains a single-purpose browser entrypoint.
 resource "cloudflare_record" "landing_apex" {
   zone_id = var.cloudflare_zone_id

@@ -77,7 +77,11 @@ HA_OIDC_COMPONENT_VERSION="${HA_OIDC_COMPONENT_VERSION:-v0.6.5-alpha}"
 HA_CONFIG_DIR="$(yaml_get stage2.homeassistant.config_dir)"
 HA_PORT="$(yaml_get stage2.homeassistant.port)"
 HA_OIDC_COMPONENT_DIR="${HA_CONFIG_DIR}/custom_components/auth_oidc"
-HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version"
+HA_OIDC_COMPONENT_MARKER_PREFIX="${HA_OIDC_COMPONENT_MARKER_PREFIX:-ha-federated-access}"
+HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.${HA_OIDC_COMPONENT_MARKER_PREFIX}-version"
+if [[ "${HA_OIDC_COMPONENT_MARKER_PREFIX}" == "ha-federated-access" && ! -f "${HA_OIDC_COMPONENT_VERSION_FILE}" && -f "${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version" ]]; then
+  HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.crooked-sentry-version"
+fi
 HA_OIDC_APPLICATION_SLUG="${HA_OIDC_APPLICATION_SLUG:-home-assistant}"
 
 mkdir -p "${LOG_DIR}"
@@ -853,7 +857,7 @@ PY
 
 main() {
   require_base_commands
-  log "===== crooked-sentry NetBird verification starting ====="
+  log "===== ha-federated-access NetBird verification starting ====="
 
   if [[ "${NETBIRD_ENABLED}" != "true" ]]; then
     record_warn "NetBird is disabled in config.yaml; skipping checks."
@@ -880,7 +884,7 @@ main() {
     check_homeassistant_oidc
   fi
 
-  log "===== crooked-sentry NetBird verification summary ====="
+  log "===== ha-federated-access NetBird verification summary ====="
   log "Passed checks: ${PASS_COUNT}"
   log "Warnings: ${WARN_COUNT}"
   log "Failures: ${FAIL_COUNT}"

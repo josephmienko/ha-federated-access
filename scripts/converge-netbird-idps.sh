@@ -296,7 +296,7 @@ PY
 }
 
 main() {
-  log "===== crooked-sentry NetBird IdP converge starting ====="
+  log "===== ha-federated-access NetBird IdP converge starting ====="
   require_command curl
   require_command jq
   require_command python3
@@ -358,7 +358,7 @@ main() {
     warn "No identity providers were converged."
   fi
 
-  log "===== crooked-sentry NetBird IdP converge completed successfully ====="
+  log "===== ha-federated-access NetBird IdP converge completed successfully ====="
 }
 
 main "$@"

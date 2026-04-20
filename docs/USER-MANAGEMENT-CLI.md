@@ -38,13 +38,13 @@ This is the **only** new variable you need to add:
    - Click your profile icon (bottom left corner)
    - Scroll to "Long-Lived Access Tokens" section
    - Click "Create Token"
-   - Name it: `"Crooked Sentry User Management"`
+   - Name it: `"Home Assistant Federated Access User Management"`
    - Click "Create"
    - Copy the token (won't be shown again!)
 
 3. **Add to .env**
    ```bash
-   echo 'HA_TOKEN=eyJ...' >> /path/to/crooked-sentry/.env
+   echo 'HA_TOKEN=eyJ...' >> /path/to/ha-federated-access/.env
    ```
 
 4. **Verify**
@@ -233,10 +233,10 @@ If you want to run this from the Raspberry Pi itself:
 
 ```bash
 # SSH into the Pi
-ssh pi@crookedsentry.local
+ssh pi@homeassistant.local
 
 # Navigate to project
-cd /home/pi/crooked-sentry
+cd /home/pi/ha-federated-access
 
 # Set environment from .env
 export $(cat .env | xargs)
@@ -251,10 +251,10 @@ To run from a remote machine (e.g., your Mac), you'll need to proxy the APIs:
 
 ```bash
 # SSH tunnel to NetBird API
-ssh -L 33073:localhost:33073 pi@crookedsentry.local
+ssh -L 33073:localhost:33073 pi@homeassistant.local
 
 # SSH tunnel to Home Assistant API
-ssh -L 8123:localhost:8123 pi@crookedsentry.local
+ssh -L 8123:localhost:8123 pi@homeassistant.local
 
 # Then run on local machine
 ./scripts/users-cli.py list

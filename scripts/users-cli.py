@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified user management CLI for Crooked Sentry infrastructure.
+Unified user management CLI for Home Assistant Federated Access infrastructure.
 
 Manages users across:
 - NetBird (VPN/Network access)
@@ -14,7 +14,7 @@ Environment Variables Required:
 Environment Variables Used (if available, with defaults):
   NETBIRD_DOMAIN              NetBird domain (default: netbird.example.invalid)
   NETBIRD_MGMT_API_PORT       NetBird API port (default: 33073)
-  NETBIRD_STACK_ROOT          NetBird stack root (default: /opt/crooked-sentry/netbird)
+  NETBIRD_STACK_ROOT          NetBird stack root (default: /opt/ha-federated-access/netbird)
   AUTHENTIK_DOMAIN            Authentik domain (default: auth.example.invalid)
   AUTHENTIK_ENABLED           Enable Authentik (default: true)
   HA_PORT                     Home Assistant port (default: 8123)
@@ -121,7 +121,7 @@ class ConfigLoader:
     @property
     def netbird_stack_root(self) -> Path:
         """Get NetBird stack root (from NETBIRD_STACK_ROOT)."""
-        root = self.get("NETBIRD_STACK_ROOT", "/opt/crooked-sentry/netbird")
+        root = self.get("NETBIRD_STACK_ROOT", "/opt/ha-federated-access/netbird")
         return Path(root)
 
     @property
@@ -160,7 +160,7 @@ class ConfigLoader:
     def authentik_stack_root(self) -> Path:
         """Get Authentik stack root (Authentik runs in NetBird stack)."""
         # Authentik runs as part of the NetBird docker-compose stack
-        root = self.get("AUTHENTIK_STACK_ROOT") or self.get("NETBIRD_STACK_ROOT", "/opt/crooked-sentry/netbird")
+        root = self.get("AUTHENTIK_STACK_ROOT") or self.get("NETBIRD_STACK_ROOT", "/opt/ha-federated-access/netbird")
         return Path(root)
 
     @property
@@ -189,8 +189,8 @@ class ConfigLoader:
             return domain
         
         # Otherwise, construct from netbird domain
-        # If netbird_domain is "netbird.crookedsentry.net", base is "crookedsentry.net"
-        # So proxy should be "ha.proxy.crookedsentry.net"
+        # If netbird_domain is "netbird.example.com", base is "example.com"
+        # So proxy should be "ha.proxy.example.com"
         netbird = self.netbird_domain
         if netbird.startswith("netbird."):
             base_domain = netbird.replace("netbird.", "", 1)
@@ -214,7 +214,7 @@ class ConfigLoader:
     def public_landing_url(self) -> str:
         """Get public landing URL (accessible without NetBird client)."""
         # Extract base domain from netbird domain
-        # netbird.crookedsentry.net → crookedsentry.net
+        # netbird.example.com → example.com
         netbird = self.netbird_domain
         if netbird.startswith("netbird."):
             base_domain = netbird.replace("netbird.", "", 1)
@@ -1029,7 +1029,7 @@ def cmd_add(args, manager: UserManager):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Unified user management for Crooked Sentry",
+        description="Unified user management for Home Assistant Federated Access",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

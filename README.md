@@ -2,7 +2,7 @@
 
 Infrastructure tooling for federated Home Assistant access.
 
-This repository is an extraction target for the auth and remote-access tooling that currently lives in the Crooked Sentry monorepo. It is not a HACS package and not a Home Assistant integration. It is a host-level orchestration repo for installing and converging:
+This repository packages auth and remote-access tooling for Home Assistant deployments. It is not a HACS package and not a Home Assistant integration. It is a host-level orchestration repo for installing and converging:
 
 - NetBird-compatible WireGuard overlay access
 - optional Authentik-backed federated SSO
@@ -13,7 +13,7 @@ This repository is an extraction target for the auth and remote-access tooling t
 
 ## Current State
 
-This initial commit intentionally preserves the working Crooked Sentry implementation with minimal repackaging. The next phase is to remove project-specific names, domains, paths, and assumptions while keeping behavior testable.
+This extraction initially preserves the known-working implementation shape with minimal repackaging. The current focus is removing project-specific names, domains, paths, and assumptions while keeping behavior testable.
 
 Do not treat this as a clean public install surface yet.
 
@@ -72,7 +72,7 @@ node --check homeassistant/auth_oidc/static/ha-branding-overrides.js
 ## Extraction Plan
 
 1. Preserve the known-working implementation in this standalone repo.
-2. Replace Crooked Sentry-specific defaults with generic config/env inputs.
+2. Replace deployment-specific defaults with generic config/env inputs.
 3. Add focused tests for config rendering and patch application.
 4. Run one real converge from this repo against the existing Pi.
 5. Replace monorepo copies with wrappers or a vendored sync path after the standalone repo proves itself.

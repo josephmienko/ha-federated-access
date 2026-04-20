@@ -357,7 +357,7 @@ See: `.env.users-cli.example` for template
 
 - **CLI Version**: 1.0
 - **Last Updated**: 2024-01-15
-- **Maintained By**: Crooked Sentry Project
+- **Maintained By**: Home Assistant Federated Access Project
 - **Python Version**: 3.8+
 - **Status**: Production Ready
 

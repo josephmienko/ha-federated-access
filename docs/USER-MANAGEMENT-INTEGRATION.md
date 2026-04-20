@@ -122,7 +122,7 @@ curl -X POST \
 Authentik is integrated via **Docker shell execution**, which runs Python code directly in the Authentik container:
 
 ```bash
-docker compose -f /opt/crooked-sentry/netbird/docker-compose.yaml \
+docker compose -f /opt/ha-federated-access/netbird/docker-compose.yaml \
   --profile authentik \
   exec -T authentik-server ak shell < python_script.py
 ```
@@ -187,7 +187,7 @@ The client discovers the Authentik container stack location from:
 
 1. `NETBIRD_STACK_ROOT` environment variable
 2. System config `netbird.stack_root` key
-3. Default: `/opt/crooked-sentry/netbird`
+3. Default: `/opt/ha-federated-access/netbird`
 
 ### Home Assistant REST API
 
@@ -451,7 +451,7 @@ sed -i 's/NETBIRD_API_TOKEN=.*/NETBIRD_API_TOKEN=new-token/' .env
 docker ps | grep authentik
 
 # If not running, start them
-cd /opt/crooked-sentry/netbird
+cd /opt/ha-federated-access/netbird
 docker compose --profile authentik up -d
 
 # Wait for startup
@@ -523,7 +523,7 @@ curl -s -H "Authorization: Token $NETBIRD_API_TOKEN" \
   http://localhost:33073/api/instance | python3 -m json.tool
 
 # Test Authentik
-cd /opt/crooked-sentry/netbird
+cd /opt/ha-federated-access/netbird
 docker compose --profile authentik exec -T \
   authentik-server ak shell << 'EOF'
 from authentik.core.models import User

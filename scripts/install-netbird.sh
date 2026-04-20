@@ -348,7 +348,7 @@ write_systemd_service() {
   local svc="/etc/systemd/system/${NETBIRD_SERVICE_NAME}"
   cat > "${svc}" <<EOF
 [Unit]
-Description=crooked-sentry NetBird Stack
+Description=ha-federated-access NetBird Stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -506,7 +506,7 @@ generate_proxy_token() {
   local raw_output=""
   raw_output="$(
     docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" exec -T management \
-      /go/bin/netbird-mgmt token create --name "${NETBIRD_PROXY_TOKEN_NAME:-crooked-sentry-proxy}" 2>/dev/null || true
+      /go/bin/netbird-mgmt token create --name "${NETBIRD_PROXY_TOKEN_NAME:-ha-federated-access-proxy}" 2>/dev/null || true
   )"
   printf '%s\n' "${raw_output}" | grep -Eo 'nbx_[A-Za-z0-9_-]+' | tail -n1
 }
@@ -692,7 +692,7 @@ EOF
 }
 
 main() {
-  log "===== crooked-sentry NetBird installer starting ====="
+  log "===== ha-federated-access NetBird installer starting ====="
   require_network
   install_docker_if_needed
   check_dns_alignment
@@ -707,7 +707,7 @@ main() {
   start_stack
   run_smoke_tests
   print_next_steps
-  log "===== crooked-sentry NetBird installer completed successfully ====="
+  log "===== ha-federated-access NetBird installer completed successfully ====="
 }
 
 main "$@"

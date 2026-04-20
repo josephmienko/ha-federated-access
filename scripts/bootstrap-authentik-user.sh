@@ -6,8 +6,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
-DEFAULT_LOG_DIR="/var/log/crooked-sentry"
-DEFAULT_NETBIRD_STACK_ROOT="/opt/crooked-sentry/netbird"
+DEFAULT_LOG_DIR="/var/log/ha-federated-access"
+DEFAULT_NETBIRD_STACK_ROOT="/opt/ha-federated-access/netbird"
 
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || { echo "Must run as root"; exit 1; }
@@ -171,12 +171,15 @@ load_env_file
 AUTHENTIK_ENABLED="${AUTHENTIK_ENABLED:-false}"
 AUTHENTIK_NETBIRD_APPLICATION_SLUG="${AUTHENTIK_NETBIRD_APPLICATION_SLUG:-netbird}"
 HA_OIDC_APPLICATION_SLUG="${HA_OIDC_APPLICATION_SLUG:-home-assistant}"
+NETBIRD_PROXY_DOMAIN="${NETBIRD_PROXY_DOMAIN:-proxy.example.invalid}"
+NETBIRD_HA_PROXY_SUBDOMAIN="${NETBIRD_HA_PROXY_SUBDOMAIN:-ha}"
+HA_OIDC_REDIRECT_URL="${HA_OIDC_REDIRECT_URL:-https://${NETBIRD_HA_PROXY_SUBDOMAIN}.${NETBIRD_PROXY_DOMAIN}/auth/oidc/redirect}"
 
 AUTHENTIK_TEST_USER_EMAIL="${AUTHENTIK_TEST_USER_EMAIL:-${1:-}}"
 AUTHENTIK_TEST_USER_PASSWORD="${AUTHENTIK_TEST_USER_PASSWORD:-${2:-}}"
 AUTHENTIK_TEST_USER_NAME="${AUTHENTIK_TEST_USER_NAME:-${3:-}}"
 AUTHENTIK_TEST_USER_EMAIL_VERIFIED="$(normalize_bool "${AUTHENTIK_TEST_USER_EMAIL_VERIFIED:-true}")"
-AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME="${AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME:-CrookedSentry OIDC verified email}"
+AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME="${AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME:-Home Assistant OIDC verified email}"
 AUTHENTIK_OIDC_PROVIDER_APPLICATION_SLUGS="${AUTHENTIK_OIDC_PROVIDER_APPLICATION_SLUGS:-${AUTHENTIK_NETBIRD_APPLICATION_SLUG},${HA_OIDC_APPLICATION_SLUG}}"
 
 [[ "${AUTHENTIK_ENABLED}" == "true" ]] || fail "AUTHENTIK_ENABLED=true is required."
@@ -203,7 +206,7 @@ email = os.environ["AUTHENTIK_TEST_USER_EMAIL"].strip().lower()
 password = os.environ["AUTHENTIK_TEST_USER_PASSWORD"]
 display_name = os.environ.get("AUTHENTIK_TEST_USER_NAME", "").strip() or email
 email_verified = os.environ.get("AUTHENTIK_TEST_USER_EMAIL_VERIFIED", "true").lower() == "true"
-mapping_name = os.environ.get("AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME", "CrookedSentry OIDC verified email").strip()
+mapping_name = os.environ.get("AUTHENTIK_EMAIL_SCOPE_MAPPING_NAME", "Home Assistant OIDC verified email").strip()
 provider_slugs = [
     slug.strip()
     for slug in os.environ.get("AUTHENTIK_OIDC_PROVIDER_APPLICATION_SLUGS", "").split(",")
@@ -260,7 +263,7 @@ with transaction.atomic():
         defaults={
             "scope_name": "email",
             "expression": mapping_expression,
-            "description": "CrookedSentry custom email scope mapping with email_verified support.",
+            "description": "Custom email scope mapping with email_verified support.",
         },
     )
 
@@ -272,7 +275,7 @@ with transaction.atomic():
         mapping.expression = mapping_expression
         mapping_changed = True
     if hasattr(mapping, "description"):
-        desired_description = "CrookedSentry custom email scope mapping with email_verified support."
+        desired_description = "Custom email scope mapping with email_verified support."
         if getattr(mapping, "description", "") != desired_description:
             mapping.description = desired_description
             mapping_changed = True
@@ -322,4 +325,4 @@ run_authentik_python "${python_script}"
 rm -f "${python_script}"
 
 log "Next step: ensure Home Assistant already has a local user whose username is exactly ${AUTHENTIK_TEST_USER_EMAIL} before the first SSO login."
-log "Then test the happy path at https://ha.proxy.crookedsentry.net/auth/oidc/redirect"
+log "Then test the happy path at ${HA_OIDC_REDIRECT_URL}"
