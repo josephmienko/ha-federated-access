@@ -99,3 +99,5 @@ node --check homeassistant/auth_oidc/static/ha-branding-overrides.js
 3. Add focused tests for config rendering and patch application.
 4. Run one real converge from this repo against the existing Pi.
 5. Replace monorepo copies with wrappers or a vendored sync path after the standalone repo proves itself.
+
+See [docs/MIGRATION-FROM-MONOREPO.md](docs/MIGRATION-FROM-MONOREPO.md) for the temporary copied-file strategy and the planned release-tarball consumption model.
