@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || { echo "Must run as root"; exit 1; }
@@ -63,6 +66,8 @@ LOG_FILE="${LOG_DIR}/install-netbird.log"
 NETBIRD_ENABLED="$(yaml_get netbird.enabled)"
 NETBIRD_STACK_ROOT="$(yaml_get netbird.stack_root)"
 NETBIRD_SERVICE_NAME="$(yaml_get netbird.compose_service_name)"
+NETBIRD_COMPOSE_FILE="$(config_first "${NETBIRD_STACK_ROOT}/docker-compose.yaml" netbird.compose_file)"
+NETBIRD_COMPOSE_ENV_FILE="$(config_first "${NETBIRD_STACK_ROOT}/.env" netbird.compose_env_file)"
 RUNTIME_PROXY_ENV="${NETBIRD_STACK_ROOT}/generated/proxy.env"
 RUNTIME_PEER_ENV="${NETBIRD_STACK_ROOT}/generated/peer.env"
 
@@ -277,8 +282,8 @@ check_dns_alignment() {
 }
 
 prepare_stack_root() {
-  install -d -m 0750 "${NETBIRD_STACK_ROOT}" "${NETBIRD_STACK_ROOT}/generated"
-  install -m 0640 "${PROJECT_ROOT}/netbird/docker-compose.yaml" "${NETBIRD_STACK_ROOT}/docker-compose.yaml"
+  install -d -m 0750 "${NETBIRD_STACK_ROOT}" "${NETBIRD_STACK_ROOT}/generated" "$(dirname "${NETBIRD_COMPOSE_FILE}")" "$(dirname "${NETBIRD_COMPOSE_ENV_FILE}")"
+  install -m 0640 "${PROJECT_ROOT}/netbird/docker-compose.yaml" "${NETBIRD_COMPOSE_FILE}"
 
   GENERATED_DIR="${NETBIRD_STACK_ROOT}/generated" \
   ENV_FILE="${ENV_FILE}" \
@@ -295,7 +300,7 @@ proxy_runtime_env_ready() {
 }
 
 write_stack_env_file() {
-  cat > "${NETBIRD_STACK_ROOT}/.env" <<EOF
+  cat > "${NETBIRD_COMPOSE_ENV_FILE}" <<EOF
 NETBIRD_DOMAIN=${NETBIRD_DOMAIN}
 NETBIRD_PROXY_DOMAIN=${NETBIRD_PROXY_DOMAIN:-}
 NETBIRD_MGMT_API_PORT=${NETBIRD_MGMT_API_PORT}
@@ -337,11 +342,11 @@ EOF
   local key=""
   for key in "${optional_keys[@]}"; do
     if [[ -n "${!key:-}" ]]; then
-      printf '%s=%s\n' "${key}" "${!key}" >> "${NETBIRD_STACK_ROOT}/.env"
+      printf '%s=%s\n' "${key}" "${!key}" >> "${NETBIRD_COMPOSE_ENV_FILE}"
     fi
   done
 
-  chmod 0600 "${NETBIRD_STACK_ROOT}/.env"
+  chmod 0600 "${NETBIRD_COMPOSE_ENV_FILE}"
 }
 
 write_systemd_service() {
@@ -356,8 +361,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=${NETBIRD_STACK_ROOT}
-ExecStart=/bin/sh -c 'profiles=""; if grep -q "^AUTHENTIK_ENABLED=true" ${NETBIRD_STACK_ROOT}/.env 2>/dev/null; then profiles="\$profiles --profile authentik"; fi; if grep -q "^NB_PROXY_TOKEN=nbx_" ${RUNTIME_PROXY_ENV} 2>/dev/null; then profiles="\$profiles --profile reverse-proxy"; fi; if grep -q "^NB_SETUP_KEY=" ${RUNTIME_PEER_ENV} 2>/dev/null; then profiles="\$profiles --profile browser-access"; fi; exec /usr/bin/docker compose --env-file ${NETBIRD_STACK_ROOT}/.env -f ${NETBIRD_STACK_ROOT}/docker-compose.yaml \$profiles up -d'
-ExecStop=/bin/sh -c 'profiles=""; if grep -q "^AUTHENTIK_ENABLED=true" ${NETBIRD_STACK_ROOT}/.env 2>/dev/null; then profiles="\$profiles --profile authentik"; fi; if grep -q "^NB_PROXY_TOKEN=nbx_" ${RUNTIME_PROXY_ENV} 2>/dev/null; then profiles="\$profiles --profile reverse-proxy"; fi; if grep -q "^NB_SETUP_KEY=" ${RUNTIME_PEER_ENV} 2>/dev/null; then profiles="\$profiles --profile browser-access"; fi; exec /usr/bin/docker compose --env-file ${NETBIRD_STACK_ROOT}/.env -f ${NETBIRD_STACK_ROOT}/docker-compose.yaml \$profiles down'
+ExecStart=/bin/sh -c 'profiles=""; if grep -q "^AUTHENTIK_ENABLED=true" ${NETBIRD_COMPOSE_ENV_FILE} 2>/dev/null; then profiles="\$profiles --profile authentik"; fi; if grep -q "^NB_PROXY_TOKEN=nbx_" ${RUNTIME_PROXY_ENV} 2>/dev/null; then profiles="\$profiles --profile reverse-proxy"; fi; if grep -q "^NB_SETUP_KEY=" ${RUNTIME_PEER_ENV} 2>/dev/null; then profiles="\$profiles --profile browser-access"; fi; exec /usr/bin/docker compose --env-file ${NETBIRD_COMPOSE_ENV_FILE} -f ${NETBIRD_COMPOSE_FILE} \$profiles up -d'
+ExecStop=/bin/sh -c 'profiles=""; if grep -q "^AUTHENTIK_ENABLED=true" ${NETBIRD_COMPOSE_ENV_FILE} 2>/dev/null; then profiles="\$profiles --profile authentik"; fi; if grep -q "^NB_PROXY_TOKEN=nbx_" ${RUNTIME_PROXY_ENV} 2>/dev/null; then profiles="\$profiles --profile reverse-proxy"; fi; if grep -q "^NB_SETUP_KEY=" ${RUNTIME_PEER_ENV} 2>/dev/null; then profiles="\$profiles --profile browser-access"; fi; exec /usr/bin/docker compose --env-file ${NETBIRD_COMPOSE_ENV_FILE} -f ${NETBIRD_COMPOSE_FILE} \$profiles down'
 RemainAfterExit=yes
 TimeoutStartSec=0
 
@@ -376,7 +381,7 @@ stop_existing_service() {
   fi
 
   log "Ensuring stale NetBird containers are down before port checks."
-  docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" down --remove-orphans >/dev/null 2>&1 || true
+  docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
 }
 
 port_in_use_tcp() {
@@ -424,7 +429,7 @@ pull_images() {
     compose_args+=(--profile reverse-proxy)
   fi
 
-  if docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" "${compose_args[@]}" pull; then
+  if docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" "${compose_args[@]}" pull; then
     if [[ "${NETBIRD_HA_PROXY_ENABLED}" == "true" ]]; then
       docker pull "netbirdio/netbird:${NETBIRD_CLIENT_TAG:-latest}" || true
     fi
@@ -468,7 +473,7 @@ pull_images() {
 }
 
 start_stack() {
-  docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" down --remove-orphans >/dev/null 2>&1 || true
+  docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
   systemctl start "${NETBIRD_SERVICE_NAME}"
 }
 
@@ -505,7 +510,7 @@ ensure_peer_env_state() {
 generate_proxy_token() {
   local raw_output=""
   raw_output="$(
-    docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" exec -T management \
+    docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" exec -T management \
       /go/bin/netbird-mgmt token create --name "${NETBIRD_PROXY_TOKEN_NAME:-ha-federated-access-proxy}" 2>/dev/null || true
   )"
   printf '%s\n' "${raw_output}" | grep -Eo 'nbx_[A-Za-z0-9_-]+' | tail -n1
@@ -529,7 +534,7 @@ start_reverse_proxy_if_enabled() {
 
   write_runtime_proxy_env "${proxy_token}"
 
-  docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" --profile reverse-proxy up -d proxy
+  docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" --profile reverse-proxy up -d proxy
   log "NetBird reverse proxy service started."
 }
 
@@ -684,8 +689,8 @@ ${authentik_next_step}
 Useful commands:
 - systemctl status ${NETBIRD_SERVICE_NAME}
 - journalctl -u ${NETBIRD_SERVICE_NAME} -b --no-pager
-- docker compose --env-file ${NETBIRD_STACK_ROOT}/.env -f ${NETBIRD_STACK_ROOT}/docker-compose.yaml ps
-- docker compose --env-file ${NETBIRD_STACK_ROOT}/.env -f ${NETBIRD_STACK_ROOT}/docker-compose.yaml logs --tail 100
+- docker compose --env-file ${NETBIRD_COMPOSE_ENV_FILE} -f ${NETBIRD_COMPOSE_FILE} ps
+- docker compose --env-file ${NETBIRD_COMPOSE_ENV_FILE} -f ${NETBIRD_COMPOSE_FILE} logs --tail 100
 - sudo ./scripts/converge-netbird-idps.sh
 - sudo ./scripts/converge-homeassistant-oidc.sh
 EOF

@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run shell syntax checks
-        run: bash -n scripts/*.sh netbird/*.sh
+        run: bash -n scripts/*.sh scripts/lib/*.sh netbird/*.sh
 
       - name: Run Python syntax checks
         run: python3 -m py_compile scripts/*.py

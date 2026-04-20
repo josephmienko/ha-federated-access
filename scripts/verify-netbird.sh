@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || { echo "Must run as root"; exit 1; }
@@ -56,6 +59,8 @@ LOG_FILE="${LOG_DIR}/verify-netbird.log"
 NETBIRD_ENABLED="$(yaml_get netbird.enabled)"
 NETBIRD_STACK_ROOT="$(yaml_get netbird.stack_root)"
 NETBIRD_SERVICE_NAME="$(yaml_get netbird.compose_service_name)"
+NETBIRD_COMPOSE_FILE="$(config_first "${NETBIRD_STACK_ROOT}/docker-compose.yaml" netbird.compose_file)"
+NETBIRD_COMPOSE_ENV_FILE="$(config_first "${NETBIRD_STACK_ROOT}/.env" netbird.compose_env_file)"
 NETBIRD_REVERSE_PROXY_ENABLED="${NETBIRD_REVERSE_PROXY_ENABLED:-false}"
 NETBIRD_HA_PROXY_ENABLED="${NETBIRD_HA_PROXY_ENABLED:-false}"
 NETBIRD_HA_PROXY_SUBDOMAIN="${NETBIRD_HA_PROXY_SUBDOMAIN:-ha}"
@@ -74,8 +79,10 @@ AUTHENTIK_OIDC_SIGNING_KEY_NAME="${AUTHENTIK_OIDC_SIGNING_KEY_NAME:-authentik Se
 NETBIRD_USER_APPROVAL_REQUIRED="${NETBIRD_USER_APPROVAL_REQUIRED:-false}"
 HA_AUTH_OIDC_ENABLED="${HA_AUTH_OIDC_ENABLED:-false}"
 HA_OIDC_COMPONENT_VERSION="${HA_OIDC_COMPONENT_VERSION:-v0.6.5-alpha}"
-HA_CONFIG_DIR="$(yaml_get stage2.homeassistant.config_dir)"
-HA_PORT="$(yaml_get stage2.homeassistant.port)"
+HA_CONFIG_DIR="$(config_first "" homeassistant.config_dir stage2.homeassistant.config_dir)"
+HA_PORT="$(config_first "" homeassistant.port stage2.homeassistant.port)"
+[[ -n "${HA_CONFIG_DIR}" ]] || { echo "Missing config key: homeassistant.config_dir"; exit 1; }
+[[ -n "${HA_PORT}" ]] || { echo "Missing config key: homeassistant.port"; exit 1; }
 HA_OIDC_COMPONENT_DIR="${HA_CONFIG_DIR}/custom_components/auth_oidc"
 HA_OIDC_COMPONENT_MARKER_PREFIX="${HA_OIDC_COMPONENT_MARKER_PREFIX:-ha-federated-access}"
 HA_OIDC_COMPONENT_VERSION_FILE="${HA_OIDC_COMPONENT_DIR}/.${HA_OIDC_COMPONENT_MARKER_PREFIX}-version"
@@ -149,8 +156,8 @@ check_service_state() {
 
 check_runtime_files() {
   local required=(
-    "${NETBIRD_STACK_ROOT}/docker-compose.yaml" \
-    "${NETBIRD_STACK_ROOT}/.env" \
+    "${NETBIRD_COMPOSE_FILE}" \
+    "${NETBIRD_COMPOSE_ENV_FILE}" \
     "${NETBIRD_STACK_ROOT}/generated/management.json" \
     "${NETBIRD_STACK_ROOT}/generated/turnserver.conf"
   )
@@ -203,7 +210,7 @@ check_compose_services() {
   fi
   local running=()
   local service=""
-  mapfile -t running < <(docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" ps --services --status running 2>/dev/null || true)
+  mapfile -t running < <(docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" ps --services --status running 2>/dev/null || true)
 
   for service in "${expected[@]}"; do
     if printf '%s\n' "${running[@]}" | grep -qx "${service}"; then
@@ -479,7 +486,7 @@ check_authentik_services() {
   local running=()
   local service=""
 
-  mapfile -t running < <(docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" --profile authentik ps --services --status running 2>/dev/null || true)
+  mapfile -t running < <(docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" --profile authentik ps --services --status running 2>/dev/null || true)
   for service in "${expected[@]}"; do
     if printf '%s\n' "${running[@]}" | grep -qx "${service}"; then
       record_pass "Authentik compose service is running: ${service}"
@@ -564,8 +571,8 @@ PY
 
   output="$(
     docker compose \
-      --env-file "${NETBIRD_STACK_ROOT}/.env" \
-      -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" \
+      --env-file "${NETBIRD_COMPOSE_ENV_FILE}" \
+      -f "${NETBIRD_COMPOSE_FILE}" \
       --profile authentik \
       exec \
       -T \
@@ -756,7 +763,7 @@ check_browser_access() {
   [[ "${NETBIRD_HA_PROXY_ENABLED}" == "true" ]] || return 0
 
   local peer_running=""
-  peer_running="$(docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" --profile browser-access ps --services --status running 2>/dev/null | grep -x 'peer' || true)"
+  peer_running="$(docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" --profile browser-access ps --services --status running 2>/dev/null | grep -x 'peer' || true)"
   if [[ "${peer_running}" == "peer" ]]; then
     record_pass "NetBird peer container is running for browser access"
   else

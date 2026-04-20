@@ -6,7 +6,11 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
+CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -24,11 +28,20 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     echo -e "${RED}✗ .env file not found at: ${ENV_FILE}${NC}"
     exit 1
 fi
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+    echo -e "${RED}✗ config.yaml file not found at: ${CONFIG_FILE}${NC}"
+    exit 1
+fi
 
 # Load environment
 set -o allexport
 source "${ENV_FILE}"
 set +o allexport
+
+NETBIRD_STACK_ROOT="${NETBIRD_STACK_ROOT:-$(config_first "/opt/ha-federated-access/netbird" netbird.stack_root)}"
+NETBIRD_COMPOSE_FILE="${NETBIRD_COMPOSE_FILE:-$(config_first "${NETBIRD_STACK_ROOT}/docker-compose.yaml" netbird.compose_file)}"
+NETBIRD_COMPOSE_ENV_FILE="${NETBIRD_COMPOSE_ENV_FILE:-$(config_first "${NETBIRD_STACK_ROOT}/.env" netbird.compose_env_file)}"
+HA_PORT="${HA_PORT:-$(config_first "8123" homeassistant.port stage2.homeassistant.port)}"
 
 check_var() {
     local var_name="$1"
@@ -119,7 +132,7 @@ fi
 
 # Test Authentik
 if docker ps 2>/dev/null | grep -q "authentik-server"; then
-    if docker compose -f "${PROJECT_ROOT}/netbird/docker-compose.yaml" \
+    if docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" \
         --profile authentik exec -T authentik-server ak shell <<< "from authentik.core.models import User; print('OK')" \
         >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Authentik Django shell responding${NC}"

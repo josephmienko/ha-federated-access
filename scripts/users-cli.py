@@ -15,9 +15,11 @@ Environment Variables Used (if available, with defaults):
   NETBIRD_DOMAIN              NetBird domain (default: netbird.example.invalid)
   NETBIRD_MGMT_API_PORT       NetBird API port (default: 33073)
   NETBIRD_STACK_ROOT          NetBird stack root (default: /opt/ha-federated-access/netbird)
+  NETBIRD_COMPOSE_FILE        NetBird runtime compose file
   AUTHENTIK_DOMAIN            Authentik domain (default: auth.example.invalid)
   AUTHENTIK_ENABLED           Enable Authentik (default: true)
   HA_PORT                     Home Assistant port (default: 8123)
+  HA_CONTAINER_NAME           Home Assistant container name (default: homeassistant)
 
 Usage:
     users-cli.py list              # List all users
@@ -38,6 +40,11 @@ from enum import Enum
 import urllib.request
 import urllib.parse
 import urllib.error
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - runtime warning covers this path
+    yaml = None
 
 # Setup logging
 logging.basicConfig(
@@ -78,6 +85,7 @@ class ConfigLoader:
         self.config_file = Path(config_file or (self.project_root / "config.yaml"))
         
         self.env_vars = self._load_env()
+        self.config = self._load_config()
         self._validate_config()
 
     def _load_env(self) -> Dict[str, str]:
@@ -93,9 +101,35 @@ class ConfigLoader:
                             vars_dict[key.strip()] = value.strip()
         return vars_dict
 
+    def _load_config(self) -> Dict[str, Any]:
+        """Load YAML config from config.yaml if available."""
+        if not self.config_file.exists():
+            return {}
+        if yaml is None:
+            logger.warning("PyYAML is not installed; config.yaml values will be ignored")
+            return {}
+        with open(self.config_file, "r", encoding="utf-8") as f:
+            value = yaml.safe_load(f) or {}
+        return value if isinstance(value, dict) else {}
+
     def get(self, key: str, default: str = "") -> str:
         """Get environment variable."""
         return os.environ.get(key) or self.env_vars.get(key, default)
+
+    def config_get(self, *paths: str, default: str = "") -> str:
+        """Get the first non-empty value from config.yaml path candidates."""
+        for path in paths:
+            cur: Any = self.config
+            for part in path.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    cur = None
+                    break
+            if cur in (None, ""):
+                continue
+            return str(cur).lower() if isinstance(cur, bool) else str(cur)
+        return default
 
     def _validate_config(self):
         """Validate that required configs exist."""
@@ -121,8 +155,29 @@ class ConfigLoader:
     @property
     def netbird_stack_root(self) -> Path:
         """Get NetBird stack root (from NETBIRD_STACK_ROOT)."""
-        root = self.get("NETBIRD_STACK_ROOT", "/opt/ha-federated-access/netbird")
+        root = self.get("NETBIRD_STACK_ROOT") or self.config_get(
+            "netbird.stack_root",
+            default="/opt/ha-federated-access/netbird",
+        )
         return Path(root)
+
+    @property
+    def netbird_compose_file(self) -> Path:
+        """Get NetBird runtime Compose file."""
+        value = self.get("NETBIRD_COMPOSE_FILE") or self.config_get(
+            "netbird.compose_file",
+            default=str(self.netbird_stack_root / "docker-compose.yaml"),
+        )
+        return Path(value)
+
+    @property
+    def netbird_compose_env_file(self) -> Path:
+        """Get NetBird runtime Compose env file."""
+        value = self.get("NETBIRD_COMPOSE_ENV_FILE") or self.config_get(
+            "netbird.compose_env_file",
+            default=str(self.netbird_stack_root / ".env"),
+        )
+        return Path(value)
 
     @property
     def netbird_domain(self) -> str:
@@ -160,13 +215,52 @@ class ConfigLoader:
     def authentik_stack_root(self) -> Path:
         """Get Authentik stack root (Authentik runs in NetBird stack)."""
         # Authentik runs as part of the NetBird docker-compose stack
-        root = self.get("AUTHENTIK_STACK_ROOT") or self.get("NETBIRD_STACK_ROOT", "/opt/ha-federated-access/netbird")
+        root = self.get("AUTHENTIK_STACK_ROOT") or self.get("NETBIRD_STACK_ROOT") or self.config_get(
+            "authentik.stack_root",
+            "netbird.stack_root",
+            default="/opt/ha-federated-access/netbird",
+        )
         return Path(root)
+
+    @property
+    def authentik_compose_file(self) -> Path:
+        """Get Authentik runtime Compose file."""
+        value = self.get("AUTHENTIK_COMPOSE_FILE") or self.get("NETBIRD_COMPOSE_FILE") or self.config_get(
+            "authentik.compose_file",
+            "netbird.compose_file",
+            default=str(self.authentik_stack_root / "docker-compose.yaml"),
+        )
+        return Path(value)
+
+    @property
+    def authentik_compose_env_file(self) -> Path:
+        """Get Authentik runtime Compose env file."""
+        value = self.get("AUTHENTIK_COMPOSE_ENV_FILE") or self.get("NETBIRD_COMPOSE_ENV_FILE") or self.config_get(
+            "authentik.compose_env_file",
+            "netbird.compose_env_file",
+            default=str(self.authentik_stack_root / ".env"),
+        )
+        return Path(value)
 
     @property
     def ha_port(self) -> int:
         """Get Home Assistant port (from HA_PORT, default 8123)."""
-        return int(self.get("HA_PORT", "8123"))
+        value = self.get("HA_PORT") or self.config_get(
+            "homeassistant.port",
+            "stage2.homeassistant.port",
+            default="8123",
+        )
+        return int(value)
+
+    @property
+    def ha_container_name(self) -> str:
+        """Get Home Assistant container name."""
+        return self.get("HA_CONTAINER_NAME") or self.config_get(
+            "homeassistant.container_name",
+            "homeassistant.compose.service",
+            "stage2.homeassistant.compose_service",
+            default="homeassistant",
+        )
 
     @property
     def ha_token(self) -> str:
@@ -380,18 +474,21 @@ class AuthentikClient:
     def __init__(self, config: ConfigLoader):
         self.config = config
         self.stack_root = config.authentik_stack_root
+        self.compose_file = config.authentik_compose_file
+        self.compose_env_file = config.authentik_compose_env_file
 
     def _run_shell(self, python_code: str) -> Tuple[str, str]:
         """Run Python code in Authentik shell."""
         try:
-            # Authentik runs in the NetBird docker-compose stack
-            # which uses docker-compose.yaml (not compose.yaml)
-            compose_file = self.stack_root / "docker-compose.yaml"
-            
+            command = ["sudo", "docker", "compose"]
+            if self.compose_env_file.exists():
+                command.extend(["--env-file", str(self.compose_env_file)])
+            command.extend([
+                 "-f", str(self.compose_file),
+                 "exec", "-T", "authentik-server", "ak", "shell",
+            ])
             proc = subprocess.run(
-                ["sudo", "docker", "compose", 
-                 "-f", str(compose_file),
-                 "exec", "-T", "authentik-server", "ak", "shell"],
+                command,
                 input=python_code.encode(),
                 capture_output=True,
                 timeout=30
@@ -555,7 +652,7 @@ class HomeAssistantClient:
         try:
             # Read auth storage file directly from docker
             proc = subprocess.run(
-                ["sudo", "docker", "exec", "homeassistant", "cat", "/config/.storage/auth"],
+                ["sudo", "docker", "exec", self.config.ha_container_name, "cat", "/config/.storage/auth"],
                 capture_output=True,
                 timeout=10
             )

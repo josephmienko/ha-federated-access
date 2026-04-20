@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 DEFAULT_LOG_DIR="/var/log/ha-federated-access"
 DEFAULT_NETBIRD_STACK_ROOT="/opt/ha-federated-access/netbird"
 
@@ -99,8 +102,8 @@ normalize_bool() {
 
 authentik_compose() {
   docker compose \
-    --env-file "${NETBIRD_STACK_ROOT}/.env" \
-    -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" \
+    --env-file "${NETBIRD_COMPOSE_ENV_FILE}" \
+    -f "${NETBIRD_COMPOSE_FILE}" \
     --profile authentik \
     "$@"
 }
@@ -120,8 +123,8 @@ run_authentik_python() {
 }
 
 ensure_authentik_running() {
-  [[ -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" ]] || fail "Missing NetBird runtime compose file: ${NETBIRD_STACK_ROOT}/docker-compose.yaml"
-  [[ -f "${NETBIRD_STACK_ROOT}/.env" ]] || fail "Missing NetBird runtime env file: ${NETBIRD_STACK_ROOT}/.env"
+  [[ -f "${NETBIRD_COMPOSE_FILE}" ]] || fail "Missing NetBird runtime compose file: ${NETBIRD_COMPOSE_FILE}"
+  [[ -f "${NETBIRD_COMPOSE_ENV_FILE}" ]] || fail "Missing NetBird runtime env file: ${NETBIRD_COMPOSE_ENV_FILE}"
 
   log "Ensuring Authentik services are running."
   authentik_compose up -d authentik-postgresql authentik-redis authentik-server authentik-worker >/dev/null
@@ -156,6 +159,8 @@ require_command docker
 LOG_DIR="$(yaml_get_or_default system.log_dir "${DEFAULT_LOG_DIR}")"
 LOG_FILE="${LOG_DIR}/bootstrap-authentik-user.log"
 NETBIRD_STACK_ROOT="${NETBIRD_STACK_ROOT:-$(yaml_get_or_default netbird.stack_root "${DEFAULT_NETBIRD_STACK_ROOT}")}"
+NETBIRD_COMPOSE_FILE="${NETBIRD_COMPOSE_FILE:-$(config_first "${NETBIRD_STACK_ROOT}/docker-compose.yaml" netbird.compose_file)}"
+NETBIRD_COMPOSE_ENV_FILE="${NETBIRD_COMPOSE_ENV_FILE:-$(config_first "${NETBIRD_STACK_ROOT}/.env" netbird.compose_env_file)}"
 
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"

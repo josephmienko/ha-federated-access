@@ -51,6 +51,29 @@ cp examples/config.example.yaml config.yaml
 
 Then edit `.env` and `config.yaml` for the target environment.
 
+## Configuration Contract
+
+`examples/config.example.yaml` is the supported config shape for this repo.
+
+Required keys:
+
+- `system.log_dir`: writable log directory for converge and verify scripts.
+- `homeassistant.config_dir`: Home Assistant config directory containing `configuration.yaml`.
+- `homeassistant.port`: local Home Assistant HTTP port.
+- `homeassistant.container_name`: Docker container name used for direct Home Assistant storage inspection.
+- `homeassistant.compose.file`: Docker Compose file that manages the Home Assistant container.
+- `homeassistant.compose.env_file`: env file for the Home Assistant Compose stack.
+- `homeassistant.compose.service`: Compose service name for Home Assistant.
+- `netbird.enabled`: whether NetBird convergence should run.
+- `netbird.stack_root`: runtime install directory for the NetBird/Auth stack.
+- `netbird.compose_service_name`: systemd service name for the NetBird/Auth stack.
+- `netbird.compose_file`: runtime Compose file for the NetBird/Auth stack.
+
+Compatibility:
+
+- Older `stage2.homeassistant.*` and `stage2.stack_root` keys are still accepted by the scripts as fallback inputs.
+- New installations should use the top-level `homeassistant.*` keys from the example.
+
 ## Validation
 
 The validation workflow checks:
@@ -63,7 +86,7 @@ The validation workflow checks:
 Equivalent local commands:
 
 ```bash
-bash -n scripts/*.sh netbird/*.sh
+bash -n scripts/*.sh scripts/lib/*.sh netbird/*.sh
 python3 -m py_compile scripts/*.py
 node --check homeassistant/auth_oidc/static/injection.js
 node --check homeassistant/auth_oidc/static/ha-branding-overrides.js

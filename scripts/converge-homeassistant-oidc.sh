@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || { echo "Must run as root"; exit 1; }
@@ -70,9 +73,23 @@ install_base_deps
 
 LOG_DIR="$(yaml_get system.log_dir)"
 LOG_FILE="${LOG_DIR}/converge-homeassistant-oidc.log"
-STACK_ROOT="$(yaml_get stage2.stack_root)"
-HA_CONFIG_DIR="$(yaml_get stage2.homeassistant.config_dir)"
-HA_PORT="$(yaml_get stage2.homeassistant.port)"
+HA_COMPOSE_ROOT="$(config_first "" homeassistant.compose.root stage2.stack_root)"
+HA_COMPOSE_FILE="$(config_first "" homeassistant.compose.file stage2.compose.file stage2.compose_file)"
+HA_COMPOSE_ENV_FILE="$(config_first "" homeassistant.compose.env_file stage2.compose.env_file stage2.compose_env_file)"
+HA_COMPOSE_SERVICE="$(config_first "homeassistant" homeassistant.compose.service stage2.homeassistant.compose_service)"
+HA_CONFIG_DIR="$(config_first "" homeassistant.config_dir stage2.homeassistant.config_dir)"
+HA_PORT="$(config_first "" homeassistant.port stage2.homeassistant.port)"
+
+if [[ -z "${HA_COMPOSE_FILE}" ]]; then
+  [[ -n "${HA_COMPOSE_ROOT}" ]] || { echo "Missing config key: homeassistant.compose.file"; exit 1; }
+  HA_COMPOSE_FILE="${HA_COMPOSE_ROOT}/compose.yaml"
+fi
+if [[ -z "${HA_COMPOSE_ENV_FILE}" ]]; then
+  [[ -n "${HA_COMPOSE_ROOT}" ]] || { echo "Missing config key: homeassistant.compose.env_file"; exit 1; }
+  HA_COMPOSE_ENV_FILE="${HA_COMPOSE_ROOT}/.env"
+fi
+[[ -n "${HA_CONFIG_DIR}" ]] || { echo "Missing config key: homeassistant.config_dir"; exit 1; }
+[[ -n "${HA_PORT}" ]] || { echo "Missing config key: homeassistant.port"; exit 1; }
 
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"
@@ -152,12 +169,12 @@ if [[ -n "${HA_OIDC_COMPONENT_PATCH_FILE}" ]]; then
 fi
 
 stack_compose_cmd() {
-  docker compose --env-file "${STACK_ROOT}/.env" -f "${STACK_ROOT}/compose.yaml" "$@"
+  docker compose --env-file "${HA_COMPOSE_ENV_FILE}" -f "${HA_COMPOSE_FILE}" "$@"
 }
 
 restart_homeassistant() {
-  if ! stack_compose_cmd restart homeassistant >/dev/null 2>&1; then
-    stack_compose_cmd up -d homeassistant >/dev/null
+  if ! stack_compose_cmd restart "${HA_COMPOSE_SERVICE}" >/dev/null 2>&1; then
+    stack_compose_cmd up -d "${HA_COMPOSE_SERVICE}" >/dev/null
   fi
 }
 

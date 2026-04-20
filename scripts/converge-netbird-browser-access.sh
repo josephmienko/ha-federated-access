@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 CONFIG_FILE="${CONFIG_FILE:-${PROJECT_ROOT}/config.yaml}"
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+[[ -f "${CONFIG_LIB}" ]] || { echo "Missing config library: ${CONFIG_LIB}"; exit 1; }
+source "${CONFIG_LIB}"
 
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || { echo "Must run as root"; exit 1; }
@@ -63,10 +66,24 @@ LOG_FILE="${LOG_DIR}/converge-netbird-browser-access.log"
 NETBIRD_ENABLED="$(yaml_get netbird.enabled)"
 NETBIRD_STACK_ROOT="$(yaml_get netbird.stack_root)"
 NETBIRD_SERVICE_NAME="$(yaml_get netbird.compose_service_name)"
-STACK_ROOT="$(yaml_get stage2.stack_root)"
-STACK_COMPOSE_SERVICE_NAME="$(yaml_get stage2.docker.compose_service_name)"
-HA_CONFIG_DIR="$(yaml_get stage2.homeassistant.config_dir)"
-HA_PORT="$(yaml_get stage2.homeassistant.port)"
+NETBIRD_COMPOSE_FILE="$(config_first "${NETBIRD_STACK_ROOT}/docker-compose.yaml" netbird.compose_file)"
+NETBIRD_COMPOSE_ENV_FILE="$(config_first "${NETBIRD_STACK_ROOT}/.env" netbird.compose_env_file)"
+HA_COMPOSE_ROOT="$(config_first "" homeassistant.compose.root stage2.stack_root)"
+HA_COMPOSE_FILE="$(config_first "" homeassistant.compose.file stage2.compose.file stage2.compose_file)"
+HA_COMPOSE_ENV_FILE="$(config_first "" homeassistant.compose.env_file stage2.compose.env_file stage2.compose_env_file)"
+HA_COMPOSE_SERVICE="$(config_first "homeassistant" homeassistant.compose.service stage2.homeassistant.compose_service)"
+HA_CONFIG_DIR="$(config_first "" homeassistant.config_dir stage2.homeassistant.config_dir)"
+HA_PORT="$(config_first "" homeassistant.port stage2.homeassistant.port)"
+if [[ -z "${HA_COMPOSE_FILE}" ]]; then
+  [[ -n "${HA_COMPOSE_ROOT}" ]] || { echo "Missing config key: homeassistant.compose.file"; exit 1; }
+  HA_COMPOSE_FILE="${HA_COMPOSE_ROOT}/compose.yaml"
+fi
+if [[ -z "${HA_COMPOSE_ENV_FILE}" ]]; then
+  [[ -n "${HA_COMPOSE_ROOT}" ]] || { echo "Missing config key: homeassistant.compose.env_file"; exit 1; }
+  HA_COMPOSE_ENV_FILE="${HA_COMPOSE_ROOT}/.env"
+fi
+[[ -n "${HA_CONFIG_DIR}" ]] || { echo "Missing config key: homeassistant.config_dir"; exit 1; }
+[[ -n "${HA_PORT}" ]] || { echo "Missing config key: homeassistant.port"; exit 1; }
 RUNTIME_PEER_ENV="${NETBIRD_STACK_ROOT}/generated/peer.env"
 HA_CONFIG_FILE="${HA_CONFIG_DIR}/configuration.yaml"
 HA_PROXY_BACKUP_FILE="${HA_CONFIG_DIR}/configuration.yaml.pre-netbird-browser-access.bak"
@@ -113,11 +130,11 @@ require_soft_var() {
 }
 
 compose_cmd() {
-  docker compose --env-file "${NETBIRD_STACK_ROOT}/.env" -f "${NETBIRD_STACK_ROOT}/docker-compose.yaml" "$@"
+  docker compose --env-file "${NETBIRD_COMPOSE_ENV_FILE}" -f "${NETBIRD_COMPOSE_FILE}" "$@"
 }
 
 stack_compose_cmd() {
-  docker compose --env-file "${STACK_ROOT}/.env" -f "${STACK_ROOT}/compose.yaml" "$@"
+  docker compose --env-file "${HA_COMPOSE_ENV_FILE}" -f "${HA_COMPOSE_FILE}" "$@"
 }
 
 api_request() {
@@ -394,8 +411,8 @@ PY
   case "${result}" in
     changed)
       log "Updated Home Assistant trusted proxy settings for NetBird browser access."
-      if ! stack_compose_cmd restart homeassistant >/dev/null 2>&1; then
-        stack_compose_cmd up -d homeassistant >/dev/null
+      if ! stack_compose_cmd restart "${HA_COMPOSE_SERVICE}" >/dev/null 2>&1; then
+        stack_compose_cmd up -d "${HA_COMPOSE_SERVICE}" >/dev/null
       fi
       log "Restarted Home Assistant to apply reverse-proxy trust settings."
       ;;

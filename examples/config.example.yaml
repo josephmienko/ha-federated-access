@@ -11,17 +11,19 @@ network:
       - name: "eth0"
         ip: "192.168.1.10"
 
-stage2:
-  stack_root: "/opt/homeassistant"
-
-  homeassistant:
-    config_dir: "/opt/homeassistant/config"
-    port: 8123
-
-  docker:
-    compose_service_name: "homeassistant-stack.service"
+homeassistant:
+  config_dir: "/opt/homeassistant/config"
+  port: 8123
+  container_name: "homeassistant"
+  compose:
+    root: "/opt/homeassistant"
+    file: "/opt/homeassistant/compose.yaml"
+    env_file: "/opt/homeassistant/.env"
+    service: "homeassistant"
 
 netbird:
   enabled: true
   stack_root: "/opt/ha-federated-access/netbird"
   compose_service_name: "ha-federated-access-netbird.service"
+  compose_file: "/opt/ha-federated-access/netbird/docker-compose.yaml"
+  compose_env_file: "/opt/ha-federated-access/netbird/.env"
