@@ -1,1 +1,3 @@
 title: null
+kramdown:
+  line_width: 0
