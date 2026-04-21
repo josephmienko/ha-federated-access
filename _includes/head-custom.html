@@ -3,6 +3,44 @@
     display: none;
   }
 
+  .cs-repo-meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    justify-content: flex-start;
+  }
+
+  .cs-repo-badges {
+    align-items: center;
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    white-space: nowrap;
+  }
+
+  .cs-repo-badges a,
+  .cs-repo-badges img {
+    display: inline-flex;
+  }
+
+  @media (max-width: 768px) {
+    .cs-repo-meta {
+      flex-direction: column;
+      gap: 0.55rem;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .cs-repo-meta-separator {
+      display: none;
+    }
+
+    .cs-repo-badges {
+      justify-content: center;
+    }
+  }
+
   @media (prefers-color-scheme: dark) {
     html,
     body {
