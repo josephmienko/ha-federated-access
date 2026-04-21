@@ -3,12 +3,26 @@
     display: none;
   }
 
+  .markdown-body > picture[align="center"] {
+    display: block;
+    line-height: 0;
+    margin: 0 auto 0.75rem;
+    text-align: center;
+  }
+
+  .markdown-body > picture[align="center"] img {
+    display: block;
+    margin: 0 auto;
+  }
+
   .cs-repo-meta {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
+    font-weight: 600;
     gap: 0.35rem 0.5rem;
     justify-content: flex-start;
+    margin: 0 0 1.5rem;
   }
 
   .cs-repo-badges {
@@ -25,6 +39,10 @@
   }
 
   @media (max-width: 768px) {
+    .markdown-body > picture[align="center"] {
+      margin-bottom: 0.5rem;
+    }
+
     .cs-repo-meta {
       flex-direction: column;
       gap: 0.55rem;
