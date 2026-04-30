@@ -1,4 +1,4 @@
-<h1><a href="https://josephmienko.github.io/ha-federated-access/">ha-federated-access</a></h1>
+<h1 style="display: none;"><a href="https://josephmienko.github.io/ha-federated-access/">ha-federated-access</a></h1>
 <picture align="center">
   <!-- Desktop Dark Mode -->
   <source media="(min-width: 769px) and (prefers-color-scheme: dark)" srcset="assets/header-wide-dark-inline.svg">
